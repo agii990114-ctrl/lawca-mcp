@@ -1,0 +1,8 @@
+{
+  "name": "lawca-backend-tools",
+  "private": true,
+  "description": "kordoc CLI used by the ingest worker",
+  "dependencies": {
+    "kordoc": "^4"
+  }
+}

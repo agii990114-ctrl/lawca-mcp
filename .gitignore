@@ -22,3 +22,7 @@ parse-test/real/ocr/
 eval/runs/*.jsonl
 eval/runs/*.stderr.txt
 eval/cwd/
+
+# 개발용 계정 비밀번호, 업로드 저장소
+.dev-credentials.txt
+backend/data/
