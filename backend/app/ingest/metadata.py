@@ -48,9 +48,14 @@ def detect(text: str) -> dict:
         a, b = "원고소송대리인" in tail or "원고대리인" in tail, "피고소송대리인" in tail or "피고대리인" in tail
         if a != b:
             meta["author_side"] = "원고" if a else "피고"
+    # 제출일: 문서 끝의 서명란(귀중·소송대리인·변호사) 바로 앞 날짜만 인정한다.
+    # 본문 중간의 사실관계 날짜(대여일 등)를 제출일로 오인해 조용히 저장하는 것을 막는다.
+    tail_text = text[-400:]
     dm = None
-    for dm in DATE_RE.finditer(text[-500:]):
-        pass                                 # 끝부분의 마지막 날짜를 제출일 후보로
+    for m in DATE_RE.finditer(tail_text):
+        after = re.sub(r"\s+", "", tail_text[m.end():m.end() + 100])[:30]     # 날짜 바로 뒤(공백 제외 30자 이내)에 서명 표지가 와야 한다
+        if re.search(r"귀중|소송대리인|변호사", after):
+            dm = m
     if dm:
         try:
             meta["filed_date"] = date(int(dm.group(1)), int(dm.group(2)), int(dm.group(3))).isoformat()

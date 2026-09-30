@@ -69,3 +69,13 @@ def test_text_quality_gate():
     assert not metadata.text_quality("a b")[0]
     assert not metadata.text_quality("!@#$%^&*()" * 30)[0]
     assert metadata.text_quality("원고는 2023. 3. 15. 피고에게 금원을 대여하였습니다. " * 5)[0]
+
+
+def test_filed_date_needs_a_signature_block():
+    """제출일은 서명란(귀중·소송대리인) 앞 날짜만 인정한다. 본문 중간의 사실관계 날짜를 제출일로 오인하지 않는다."""
+    body = "준 비 서 면\n사 건 2026가합90001 대여금\n" + "원고는 2023. 3. 15. 피고에게 금원을 대여하였다고 주장합니다. " * 3
+    assert "filed_date" not in metadata.detect(body)                                          # 서명란이 없는 문서
+    assert "filed_date" not in metadata.detect(body + "\n나. 2.\n피고 소송대리인")               # 서명란 날짜가 손상된 문서: 대여일을 제출일로 쓰지 않는다
+    ok = metadata.detect(body + "\n2026. 5. 20.\n피고 소송대리인 변호사 홍길동\n서울중앙지방법원 귀중")
+    assert ok["filed_date"] == "2026-05-20"
+    assert metadata.detect(body + "\n2026. 5. 20.\n서울중앙지방법원 제12민사부 귀중")["filed_date"] == "2026-05-20"

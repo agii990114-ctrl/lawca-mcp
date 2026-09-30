@@ -30,7 +30,11 @@ def _friendly(stderr: str, returncode: int) -> str:
 
 
 def parse_file(stored_path: str, ext: str) -> tuple[str, dict]:
-    src = storage.blob_path(stored_path)
+    return parse_path(storage.blob_path(stored_path), ext)
+
+
+def parse_path(src: Path, ext: str) -> tuple[str, dict]:
+    """임의 경로의 파일을 텍스트로 변환한다(저장소 밖 파일도 가능: 검증 도구용)."""
     workdir = storage.TMP / f"parse-{uuid.uuid4().hex}"
     workdir.mkdir(parents=True, exist_ok=True)
     try:
