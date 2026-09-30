@@ -9,6 +9,7 @@ def test_login_me_logout(login):
     me = api.get("/api/auth/me").json()
     assert me["user_id"] == "t_lawyer_a" and me["role"] == "변호사" and me["groups"] == ["T-A"]
     assert "documents.upload" in me["permissions"] and "users.manage" not in me["permissions"]
+    assert me["csrf_token"] == api.csrf                       # 새로고침 후 복구용
     assert api.post("/api/auth/logout").status_code == 200
     assert api.get("/api/auth/me").status_code == 401
 

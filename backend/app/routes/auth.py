@@ -82,8 +82,9 @@ def logout(request: Request, response: Response, user: dict = Depends(require(al
 
 @router.get("/auth/me")
 def me(user: dict = Depends(current_user)):
+    """새로고침 후에도 화면이 CSRF 토큰을 다시 받을 수 있게 함께 돌려준다(같은 오리진 정책상 다른 사이트는 읽을 수 없다)."""
     with db.tx() as c:
-        return _me(c, user)
+        return {**_me(c, user), "csrf_token": user["csrf"]}
 
 
 @router.post("/auth/change-password")

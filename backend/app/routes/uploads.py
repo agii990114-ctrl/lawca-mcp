@@ -138,19 +138,20 @@ def get_batch(batch_id: int, user: dict = Depends(require("documents.read"))):
 @router.get("/jobs")
 def list_jobs(status: str | None = None, batch_id: int | None = None, mine: bool = False, limit: int = 100, offset: int = 0,
               user: dict = Depends(require("documents.read"))):
+    """counts는 상태 필터와 무관하게 (묶음·본인 필터가 적용된) 범위 전체의 상태별 개수다. 상태 칩 표시용."""
     limit = max(1, min(limit, 500))
-    where, params = ["true"], []
+    scope, sparams = ["true"], []
+    if batch_id is not None:
+        scope.append("j.batch_id = %s"); sparams.append(batch_id)
+    if mine:
+        scope.append("j.created_by = %s"); sparams.append(user["user_id"])
+    where, params = list(scope), list(sparams)
     if status:
         sts = [s.strip() for s in status.split(",") if s.strip()]
         where.append("j.status = ANY(%s)"); params.append(sts)
-    if batch_id is not None:
-        where.append("j.batch_id = %s"); params.append(batch_id)
-    if mine:
-        where.append("j.created_by = %s"); params.append(user["user_id"])
-    w = " AND ".join(where)
     with db.tx(user["user_id"]) as c:
-        counts = _counts(c, w, params)
-        rows = c.execute(f"SELECT {JOB_COLS} FROM ingest_jobs j WHERE {w} ORDER BY j.job_id DESC LIMIT %s OFFSET %s",
+        counts = _counts(c, " AND ".join(scope), sparams)
+        rows = c.execute(f"SELECT {JOB_COLS} FROM ingest_jobs j WHERE {' AND '.join(where)} ORDER BY j.job_id DESC LIMIT %s OFFSET %s",
                          (*params, limit, offset)).fetchall()
     return {"counts": counts, "items": rows}
 

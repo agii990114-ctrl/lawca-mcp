@@ -158,3 +158,14 @@ def test_upload_without_csrf_rejected(login):
     a = login("t_lawyer_a")
     a.csrf = None
     assert up(a, [("a.pdf", fake_pdf())]).status_code == 403
+
+
+def test_job_counts_ignore_the_status_filter(login):
+    """상태 칩이 항상 전체 개수를 보여 주도록, counts는 status 필터와 무관한 범위 전체 집계다."""
+    a = login("t_lawyer_a")
+    r = up(a, [("ok-count.pdf", fake_pdf(b"cnt" * 200)), ("bad-count.exe", b"MZ" + b"\0" * 50)])
+    batch = r.json()["batch_id"]
+    only_rejected = a.get(f"/api/jobs?batch_id={batch}&status=rejected").json()
+    assert [j["status"] for j in only_rejected["items"]] == ["rejected"]
+    assert only_rejected["counts"] == {"queued": 1, "rejected": 1}          # 필터와 무관하게 묶음 전체 집계
+    assert a.get(f"/api/jobs?batch_id={batch}&status=queued").json()["counts"] == {"queued": 1, "rejected": 1}
