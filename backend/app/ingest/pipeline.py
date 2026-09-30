@@ -102,7 +102,8 @@ def do_parse(conn, job: dict) -> str:
             cands = det.get("case_no_candidates")
             reason = "사건이 지정되지 않았습니다. 사건을 선택해 주세요."
             if det.get("case_no"):
-                reason = f"문서의 사건번호({det['case_no']})와 일치하는 등록된 사건이 없습니다. 사건을 등록하거나 선택해 주세요."
+                reason = (f"문서의 사건번호({det['case_no']})와 일치하는 사건을 이 접근 그룹에서 찾지 못했습니다"
+                          "(등록되지 않았거나 이 그룹에서 볼 수 없는 사건일 수 있습니다). 사건을 등록하거나 선택해 주세요.")
             elif cands:
                 reason = f"문서에 사건번호가 여러 개 있어 자동으로 지정하지 못했습니다({', '.join(cands)}). 사건을 선택해 주세요."
             _finish(conn, job["job_id"], "needs_review", reason, **upd)
