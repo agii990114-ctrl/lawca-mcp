@@ -1,0 +1,35 @@
+PASS 도구 목록 ['get_document', 'list_matters', 'search_documents']
+PASS 도구 설명에 식별자 전용 인자·OCR 한계 안내 포함 
+PASS list_matters 권한 범위 u_park count=8 groups=['G-C']
+PASS list_matters 권한 범위 u_lee count=16 groups=['G-A']
+PASS list_matters 권한 범위 u_kim count=24 groups=['G-A', 'G-B']
+PASS list_matters 권한 범위 u_admin count=32 groups=['G-A', 'G-B', 'G-C']
+PASS 사용자 미지정 시 거부 meta={'io.modelcontextprotocol/serverInfo': {'name': 'lawca', 'version': ''}} content=[TextContent(t
+PASS 미등록 사용자 거부 meta={'io.modelcontextprotocol/serverInfo': {'name': 'lawca', 'version': ''}} content=[TextContent(t
+   검색 counter  n= 32 hit@1=0.84 hit@3=1.00 hit@10=1.00
+   검색 detail   n= 32 hit@1=0.88 hit@3=0.97 hit@10=0.97
+   검색 case_no  n= 32 hit@1=1.00 hit@3=1.00 hit@10=1.00
+   검색 party    n= 32 hit@1=1.00 hit@3=1.00 hit@10=1.00
+PASS 식별자 필터(case_no/party) 정확도 100% 
+PASS 주제 질의 hit@3 >= 0.9 0.98
+PASS 질의문 사건번호 자동 승격 ['질의문에서 사건번호 2025가단73815를 발견해 정확 일치 필터로 적용했습니다.']
+PASS 금액 정확 일치 필터 120,000,000 -> ['d6104b', 'd6104a', 'd4101b', 'd4101a']
+PASS 인자 없는 검색은 오류 
+PASS 없는 식별자는 근거 없음 
+PASS list_matters 기본값은 식별정보 비노출 []
+PASS list_matters 자리표시자와 matter_id 유지 
+PASS search_documents 기본값은 결과 자신의 식별정보 비노출(best_section·snippet 포함, 64개 질의) []
+PASS include_identifiers=true 는 실제 값 반환 
+PASS search include_identifiers=true 는 사건번호 반환 
+PASS 식별자 필터는 마스킹과 무관하게 동작 
+PASS 권한 밖 문서가 검색에 미노출 16건
+PASS 권한 밖과 없는 문서의 응답이 동일(존재 비노출) 문서를 찾을 수 없거나 접근 권한이 없습니다.
+PASS 64개 문서 마스킹 후 PII·당사자·사건번호·금액 잔존 0건 []
+PASS mask=false 는 원문(경고 포함) 
+PASS 마스킹본에 주입 방어 안내·잔여 위험 고지 
+PASS 검색 snippet 마스킹 []
+PASS 감사 로그 기록 {'get_document': 68, 'list_matters': 6, 'search_documents': 199}
+PASS 원문 조회(mask=false)가 로그에 구분 기록 1
+PASS 식별정보 공개 요청(include_identifiers=true)이 로그에 구분 기록 2
+PASS 로그에 사용자 신원 기록 {'u_lee', 'u_kim', 'u_park', 'u_admin'}
+결과: 30/30 통과

@@ -22,7 +22,8 @@ USERS = [  # 권한 테스트용 사용자
 ]
 GROUPS = {"G-A": "일반 사건군 A", "G-B": "일반 사건군 B", "G-C": "격리 사건군 C (이해충돌 방지 테스트용)"}
 
-RE_SECTION = re.compile(r"^([1-5])\.\s")
+# 준비서면의 표준 5개 제목만 섹션으로 인정한다. 소장·답변서의 "1. 원고는 …" 같은 번호 문장은 제목이 아니다(섹션명에 본문이 새는 것을 방지).
+RE_SECTION = re.compile(r"^([1-5])\.\s*(상대방 주장의 요지|인정 및 부인|쟁점별 반박|입증방법|결론)(?:\s|$)")
 RE_SUB = re.compile(r"^([가-하])\.\s")
 
 
@@ -47,9 +48,9 @@ def make_chunks(lines):
     for l in body[first:]:
         s = l.strip()
         if RE_SECTION.match(s):
-            flush(); buf = [s]; section = s; sub = None
+            flush(); buf = [s]; mm = RE_SECTION.match(s); section = f"{mm.group(1)}. {mm.group(2)}"; sub = None
         elif section and section.startswith("3.") and RE_SUB.match(s):
-            flush(); buf = [s]; sub = s[:30]
+            flush(); buf = [s]; sub = s[:20]
         else:
             buf.append(l)
     flush()

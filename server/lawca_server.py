@@ -36,9 +36,20 @@ def _uid() -> str:
     return db.current_user_id()
 
 
+HIDDEN = {"case_no": "[사건번호]", "plaintiff": "[원고]", "defendant": "[피고]", "attorney_name": "[담당변호사]"}
+
+
+def _hide_identifiers(row: dict) -> dict:
+    """과거 사건 식별정보를 자리표시자로 바꾼다. 사건은 matter_id·doc_id로 가리킨다."""
+    for k, v in HIDDEN.items():
+        if k in row:
+            row[k] = v
+    return row
+
+
 @mcp.tool()
 def list_matters(case_type: str | None = None, result: str | None = None, our_side: str | None = None,
-                 limit: int = 30) -> dict:
+                 limit: int = 30, include_identifiers: bool = False) -> dict:
     """현재 사용자가 접근할 수 있는 사건 목록을 조회합니다. 접근 권한이 없는 사건은 반환되지 않습니다.
 
     인자(모두 선택):
@@ -46,10 +57,13 @@ def list_matters(case_type: str | None = None, result: str | None = None, our_si
     - result: 사건 결과. "승소" | "패소" | "일부승소" | "진행중" (우리 사무소 대리 측 기준)
     - our_side: 우리 사무소가 대리하는 쪽. "원고" | "피고"
     - limit: 최대 100 (기본 30)
+    - include_identifiers: 기본 false. 기본값에서는 사건번호·당사자명·담당 변호사가 "[사건번호]" "[원고]" "[피고]"
+      "[담당변호사]"로 가려집니다(사건은 matter_id로 구분). 서면 작성이나 유사 사건 참고에는 항상 false를 쓰세요.
+      true는 사용자가 특정 사건을 실제로 식별해 달라고 명시적으로 요청했을 때만 사용하며, 감사 로그에 별도로 기록됩니다.
 
-    반환 필드: matter_id, case_no(사건번호 형식: 연도+부호+번호, 예 2025가합12345), case_type, court,
-    plaintiff, defendant, our_side, attorney_name, result, doc_count, issue_tags(해당 사건 서면의 쟁점 태그).
-    참고: 이 목록은 사건 메타데이터이며 서면 본문이 아닙니다. 당사자명은 새 서류에 옮기지 마세요.
+    반환 필드: matter_id, case_no(형식: 연도+부호+번호, 예 2025가합12345), case_type, court, plaintiff, defendant,
+    our_side, attorney_name, result, doc_count, issue_tags(해당 사건 서면의 쟁점 태그).
+    참고: 이 목록은 사건 메타데이터이며 서면 본문이 아닙니다. 식별정보는 새 서류에 옮기지 마세요.
     """
     uid = _uid()
     limit = max(1, min(int(limit), 100))
@@ -74,16 +88,22 @@ def list_matters(case_type: str | None = None, result: str | None = None, our_si
         conn.close()
     truncated = len(rows) > limit
     rows = rows[:limit]
-    db.audit(uid, "list_matters", {"case_type": case_type, "result": result, "our_side": our_side, "limit": limit}, [], len(rows))
-    return {"count": len(rows), "truncated": truncated,
-            "note": "접근 가능한 사건만 표시됩니다." + (" limit을 넘어 일부만 표시되었습니다." if truncated else ""),
-            "matters": [dict(r) for r in rows]}
+    db.audit(uid, "list_matters", {"case_type": case_type, "result": result, "our_side": our_side, "limit": limit,
+                                   "include_identifiers": include_identifiers}, [], len(rows))
+    matters = [dict(r) for r in rows]
+    if not include_identifiers:
+        matters = [_hide_identifiers(m) for m in matters]
+    note = "접근 가능한 사건만 표시됩니다." + (" limit을 넘어 일부만 표시되었습니다." if truncated else "")
+    if not include_identifiers:
+        note += " 사건번호·당사자명·담당 변호사는 가려져 있습니다(include_identifiers=false)."
+    return {"count": len(matters), "truncated": truncated, "note": note, "matters": matters}
 
 
 @mcp.tool()
 def search_documents(query: str | None = None, case_no: str | None = None, party_name: str | None = None,
                      amount: str | None = None, doc_kind: str | None = None, issue_tag: str | None = None,
-                     our_side: str | None = None, result: str | None = None, limit: int = 5) -> dict:
+                     our_side: str | None = None, result: str | None = None, limit: int = 5,
+                     include_identifiers: bool = False) -> dict:
     """유사한 과거 서면을 검색합니다(문서 단위 결과). 접근 권한이 있는 문서만 검색 대상입니다.
 
     ★ 식별자는 반드시 전용 인자로 넘기세요. 사건번호·당사자명·금액은 의미 검색(query)으로 찾을 수 없고
@@ -98,10 +118,13 @@ def search_documents(query: str | None = None, case_no: str | None = None, party
     - issue_tag: 쟁점 태그 부분일치 (예: "소멸시효", "하자", "경영상 해고"). 결과의 issue_tags에서 태그를 확인할 수 있습니다.
     - our_side / result: 사건 메타데이터 필터 ("원고"|"피고", "승소"|"패소"|"일부승소"|"진행중")
     - limit: 최대 20 (기본 5)
+    - include_identifiers: 기본 false. 기본값에서는 결과의 사건번호가 "[사건번호]"로 가려집니다(당사자명은 원래 반환하지 않음).
+      출처 표기는 doc_id(+섹션)로 하세요. true는 사용자가 특정 서면의 사건번호를 명시적으로 확인해 달라고 할 때만 쓰며,
+      감사 로그에 별도로 기록됩니다.
     query 또는 필터 중 최소 하나가 필요합니다.
 
-    반환: 문서별 doc_id, 사건 메타데이터, 쟁점 태그, score, best_section(가장 관련된 섹션)과 snippet(마스킹됨).
-    case_no와 doc_id는 출처 표기용입니다. 결과가 비어 있으면 근거가 없는 것이므로 '근거 없음'으로 답하세요.
+    반환: 문서별 doc_id, matter_id, 사건 메타데이터, 쟁점 태그, score, best_section(가장 관련된 섹션)과 snippet(마스킹됨).
+    결과가 비어 있으면 근거가 없는 것이므로 '근거 없음'으로 답하세요.
     한계: 문서 수가 적은 더미 데이터 기준으로 검증되었고, 요약이 아닌 가장 관련된 청크를 보여줍니다.
     """
     uid = _uid()
@@ -121,9 +144,14 @@ def search_documents(query: str | None = None, case_no: str | None = None, party
         mask = r.pop("_mask")
         snippet, _ = mask_text(raw, **mask)
         r["snippet"] = snippet[:400]
+        if r.get("best_section"):   # 섹션명도 본문에서 유래하므로 같은 마스킹을 적용한다(방어적)
+            r["best_section"] = mask_text(r["best_section"], **mask)[0]
+        if not include_identifiers:
+            r["case_no"] = HIDDEN["case_no"]
         out.append(r)
     db.audit(uid, "search_documents",
-             {"query": query, **{k: v for k, v in applied.items()}, "limit": limit},
+             {"query": query, **{k: v for k, v in applied.items()}, "limit": limit,
+              "include_identifiers": include_identifiers},
              [r["doc_id"] for r in out], len(out))
     resp = {"count": len(out), "applied_filters": applied, "results": out}
     if notes:
@@ -162,12 +190,13 @@ def get_document(doc_id: str, mask: bool = True) -> dict:
         conn.close()
     if row is None:
         db.audit(uid, "get_document", {"doc_id": doc_id, "mask": mask, "found": False}, [], 0)
-        return {"error": "문서를 찾을 수 없거나 접근 권한이 없습니다.", "doc_id": doc_id}
+        return {"error": "문서를 찾을 수 없거나 접근 권한이 없습니다."}
     text = row["full_text"]
     report = {}
     if mask:
-        text, report = mask_text(text, plaintiff=row["plaintiff"], defendant=row["defendant"],
-                                 attorney=row["attorney_name"], case_no=row["case_no"])
+        mk = dict(plaintiff=row["plaintiff"], defendant=row["defendant"], attorney=row["attorney_name"], case_no=row["case_no"])
+        text, report = mask_text(text, **mk)
+        sections = [mask_text(s or "", **mk)[0] for s in sections]
     db.audit(uid, "get_document", {"doc_id": doc_id, "mask": mask}, [doc_id], 1)
     resp = {
         "doc_id": doc_id, "matter_id": row["matter_id"], "case_no": row["case_no"] if not mask else "[사건번호]",
