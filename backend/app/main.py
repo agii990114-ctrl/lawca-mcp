@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import config, db
 from .ingest import storage
-from .routes import admin, auth, documents, matters, uploads
+from .routes import admin, auth, documents, matters, tokens, uploads
 
 log = logging.getLogger("lawca.api")
 
@@ -55,7 +55,7 @@ def health():
     return {"status": "ok"}
 
 
-for r in (auth.router, admin.router, matters.router, documents.router, uploads.router):
+for r in (auth.router, admin.router, matters.router, documents.router, uploads.router, tokens.router):
     app.include_router(r, prefix="/api")
 
 # 프론트엔드 빌드 결과가 있으면 같은 오리진으로 서빙한다(쿠키 인증·CSRF를 단순하게 유지)

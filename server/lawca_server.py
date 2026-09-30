@@ -1,7 +1,9 @@
 """법무법인 AI 업무 지원 MCP 서버 (MVP): list_matters, search_documents, get_document
 
-실행: LAWCA_USER_ID=u_kim python server/lawca_server.py   (stdio)
-- 권한: 요청자 신원은 서버 프로세스의 LAWCA_USER_ID. DB의 행 수준 보안(RLS)이 접근 범위를 강제한다.
+실행
+  운영(HTTP): python server/lawca_server.py --transport http --port 8001   (프록시 뒤, 웹에서 발급한 개인 토큰으로 인증)
+  개발(stdio): LAWCA_USER_ID=u_kim python server/lawca_server.py
+- 권한: HTTP 모드는 요청의 Bearer 토큰이 가리키는 사용자, stdio 모드는 LAWCA_USER_ID(개발용). DB의 행 수준 보안(RLS)이 접근 범위를 강제한다.
 - 모든 호출은 감사 로그에 남는다(기록 실패 시 호출도 실패).
 - 참고 서면 본문은 기본적으로 마스킹된 상태로만 나간다.
 """
@@ -216,5 +218,27 @@ def get_document(doc_id: str, mask: bool = True) -> dict:
     return resp
 
 
+def run_http(host: str, port: int) -> None:
+    """무상태 HTTP(요청마다 토큰으로 신원 확인). 프록시 뒤 내부 네트워크에서만 접근되는 것을 전제로 한다."""
+    import uvicorn
+    from mcp.server.transport_security import TransportSecuritySettings
+    from http_auth import TokenAuthMiddleware
+
+    db.set_http_mode()          # 이 모드에서는 환경변수 신원을 쓰지 않는다
+    # DNS 리바인딩 보호는 브라우저 기반 공격을 막는 장치인데, 이 서버는 Bearer 토큰 없이는 아무것도 하지 않고 프록시 뒤에서만 열려 있다.
+    app = mcp.streamable_http_app(stateless_http=True, json_response=True,
+                                  transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
+    uvicorn.run(TokenAuthMiddleware(app), host=host, port=port, log_level="info", proxy_headers=True, forwarded_allow_ips="*")
+
+
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8001)
+    a = ap.parse_args()
+    if a.transport == "http":
+        run_http(a.host, a.port)
+    else:
+        mcp.run(transport="stdio")

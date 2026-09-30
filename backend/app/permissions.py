@@ -7,7 +7,8 @@
 PERMISSIONS: dict[str, set[str]] = {
     "관리자": {"users.manage", "groups.manage", "audit.read",
               "matters.read", "matters.create", "documents.read", "documents.upload", "documents.delete", "jobs.manage"},
-    "변호사": {"matters.read", "matters.create", "documents.read", "documents.upload", "documents.delete", "jobs.manage"},
+    # mcp.token: 에이전트(Claude 등)가 본인 권한으로 사내 서면을 검색·조회하는 MCP 접속 토큰을 발급받는다
+    "변호사": {"matters.read", "matters.create", "documents.read", "documents.upload", "documents.delete", "jobs.manage", "mcp.token"},
     "사무원": {"matters.read", "matters.create", "documents.read", "documents.upload", "jobs.manage"},
 }
 

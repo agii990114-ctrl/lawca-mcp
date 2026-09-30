@@ -87,6 +87,32 @@ services:
       retries: 6
       start_period: 15s
 
+  # 에이전트(Claude 등)용 MCP 서버. 웹에서 변호사가 발급한 개인 토큰으로만 접근되고, 발급자의 접근 그룹 권한(RLS)으로 동작한다.
+  mcp:
+    <<: *app
+    command: ["python", "server/lawca_server.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      <<: *db-env
+      LAWCA_READER_PASSWORD: ${LAWCA_READER_PASSWORD}
+      LAWCA_AUDIT_PASSWORD: ${LAWCA_AUDIT_PASSWORD}
+      LAWCA_OFFLINE: "1"
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - lawca_models:/home/app/.cache:ro
+    tmpfs:
+      - /tmp:size=256m
+    depends_on:
+      db: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    networks: [web, data]              # 인터넷 접근 불가
+    mem_limit: 4g                       # 질의 임베딩용 모델을 메모리에 올린다
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
   worker:
     <<: *app
     command: ["python", "-m", "backend.app.worker"]
@@ -135,6 +161,7 @@ services:
       - caddy_config:/config
     depends_on:
       api: {condition: service_healthy}
+      mcp: {condition: service_healthy}
     networks: [edge, web]
 
 networks:

@@ -2,6 +2,7 @@ import { NavLink, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth";
 import { Spinner } from "./components/ui";
 import Admin from "./pages/Admin";
+import AiAccess from "./pages/AiAccess";
 import ChangePassword from "./pages/ChangePassword";
 import Documents from "./pages/Documents";
 import Jobs from "./pages/Jobs";
@@ -23,6 +24,7 @@ function Shell() {
           <NavLink to="/jobs" className={link}>처리 현황</NavLink>
           <NavLink to="/matters" className={link}>사건</NavLink>
           <NavLink to="/documents" className={link}>문서</NavLink>
+          {can("mcp.token") && <NavLink to="/ai" className={link}>AI 연결</NavLink>}
           {can("users.manage") && <NavLink to="/admin" className={link}>관리</NavLink>}
         </nav>
         <div className="who">
@@ -52,6 +54,7 @@ export default function App() {
         <Route path="matters" element={<Matters />} />
         <Route path="documents" element={<Documents />} />
         <Route path="password" element={<ChangePassword />} />
+        <Route path="ai" element={can("mcp.token") ? <AiAccess /> : <Navigate to="/" replace />} />
         <Route path="admin" element={can("users.manage") ? <Admin /> : <Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

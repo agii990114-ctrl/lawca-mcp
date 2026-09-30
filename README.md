@@ -52,6 +52,7 @@ backend/.venv/Scripts/python -m pytest                 # 백엔드 테스트 46+
 | `proxy` (Caddy) | 브라우저의 유일한 입구: https, 업로드 상한, 보안 헤더(CSP 등) | 가능 |
 | `api` | FastAPI: 로그인·사건·문서·업로드 접수, 빌드된 화면 서빙 | **차단** |
 | `worker` | 문서 변환·OCR·청킹·임베딩·저장(원문을 가장 많이 다룸) | **차단** |
+| `mcp` | 에이전트(Claude 등)용 MCP 서버. 프록시의 `/mcp`, 웹에서 발급한 **개인 토큰**으로 접속, 발급자의 접근 그룹 권한으로 동작 | **차단** |
 | `db` | PostgreSQL + pgvector, 접근 그룹 권한(RLS) 강제 | **차단** |
 | `migrate` | (일회성) 스키마 마이그레이션·앱용 DB 계정 생성 — 소유자 비밀번호를 가진 유일한 앱 컨테이너 | 차단 |
 | `fetch-models` | (일회성, 최초 1회) 임베딩·OCR 모델을 볼륨에 내려받기 | 가능 |
@@ -69,11 +70,11 @@ docker compose -f docker-compose.yml run --rm migrate python -m backend.app.mana
 - https 인증서: 기본은 Caddy 내부 CA(`tls internal`, 브라우저에 신뢰 등록 필요). 실제 도메인·사내 인증서는 `LAWCA_HOST`와 `deploy/Caddyfile`의 `tls` 줄을 바꾼다. 외부에 공개하려면 `LAWCA_BIND=0.0.0.0`.
 - 볼륨: `lawca_pgdata`(DB), `lawca_uploads`(업로드 원본), `lawca_models`(모델), `caddy_data`. **백업 대상은 앞의 두 개**이며 함께 백업해야 일관된다.
 - 백엔드 테스트는 워커 컨테이너가 같은 DB의 업로드 작업을 집어 가지 않도록 `docker compose stop worker` 후 실행하는 것이 확실하다.
-- MCP 서버(에이전트용 도구)는 아직 컨테이너화하지 않았다.
+- MCP 서버는 컨테이너 `mcp`로 함께 뜬다. 변호사가 웹의 **AI 연결**에서 토큰을 발급해 Claude에 등록한다(연결 방법은 [server/README.md](server/README.md)).
 
 프런트 개발 서버는 `npm run dev`(포트 5173, `/api`를 8000으로 프록시). 운영에서는 **https 리버스 프록시 뒤에서** `LAWCA_COOKIE_SECURE=1`로 실행하고, 프록시에 요청 본문 상한(`client_max_body_size`)을 설정하세요.
 
-MCP 클라이언트 연결은 `.mcp.json.example` 참고. 사용자 신원은 `LAWCA_USER_ID`(테스트 사용자 u_kim, u_lee, u_park, u_admin)로 지정한다. 자세한 내용은 [server/README.md](server/README.md).
+MCP 연결은 [server/README.md](server/README.md)와 `.mcp.json.example` 참고(운영: 웹에서 발급한 토큰, 개발: stdio + `LAWCA_USER_ID`).
 
 ## 설계 요점
 
@@ -90,7 +91,7 @@ MCP 클라이언트 연결은 `.mcp.json.example` 참고. 사용자 신원은 `L
 - `list_matters`·`search_documents`는 사건번호·당사자명을 기본으로 가리며(`include_identifiers=true`로 열면 감사 로그에 별도 기록), 본문 속 제3자 인명은 여전히 걸러내지 못함.
 - 프롬프트 인젝션 방어는 1회 시험만 통과했으며 충분히 검증되지 않음.
 - `check_citation`, `search_cases` 미구현.
-- MCP 서버의 사용자 신원은 아직 환경변수 주입 방식(웹 로그인과 별개). 실제 배포에는 웹 세션·토큰과 연결해야 함.
+- MCP 토큰은 탈취되면 만료·폐기 전까지 그대로 쓸 수 있는 베어러 비밀이다(IP·기기 고정, MFA 없음). 호출 속도 제한은 서버 프로세스별 메모리 기준이라 여러 대로 늘리면 공유되지 않는다. stdio 모드의 환경변수 신원은 개발 전용이다.
 - 웹: 업로드 원본의 저장 시 암호화·바이러스 검사 없음(볼륨 암호화·별도 검사 전제), MFA·IP 기반 제한 없음, 로그인 잠금은 아이디 기준이라 남의 계정을 잠그는 공격 가능, 프런트엔드 자동화 테스트 없음(수동 확인만).
 - 임베딩은 CPU에서 약 1~1.5 청크/초라 대량 색인(수만 건)에는 GPU 또는 다중 워커가 필요함.
 - 업로드 시험은 DOCX·합성 스캔 PDF로만 했고 실제 한컴(HWP/HWPX)·법원 서식은 아직 검증하지 못함.

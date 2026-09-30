@@ -80,6 +80,9 @@ async def main():
                 args = {"case_no": q, "limit": 10}
             if qt == "party":
                 args = {"party_name": q.replace("원고 ", ""), "limit": 10}
+            if qt in ("case_no", "party"):    # 웹으로 문서가 더 올라와도 성립하도록, 정답은 '그 사건의 모든 문서'
+                golds = [r[0] for r in o.execute("select doc_id from documents where matter_id = (select matter_id from documents where doc_id = %s)", (gold,))]
+                args["limit"] = 20
             _, p = await call(c, "search_documents", args)
             ids = [r["doc_id"] for r in p["results"]]
             pos = min([ids.index(g) + 1 for g in golds if g in ids] or [99])

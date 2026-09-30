@@ -14,5 +14,7 @@ frontend/dist
 parse-test
 eval
 dummy-data
-server
+server/.venv
+server/tests
+server/__pycache__
 *.log

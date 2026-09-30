@@ -20,8 +20,10 @@ def embed_query(text: str) -> str:
     """로컬 임베딩 모델(외부 전송 없음). 최초 호출 시 로드한다."""
     global _model
     if _model is None:
+        import os
         from fastembed import TextEmbedding
-        _model = TextEmbedding(model_name="intfloat/multilingual-e5-large")
+        _model = TextEmbedding(model_name="intfloat/multilingual-e5-large", cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"),
+                               local_files_only=os.environ.get("LAWCA_OFFLINE") == "1")
     v = next(iter(_model.query_embed([text])))
     return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
 

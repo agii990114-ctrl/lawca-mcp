@@ -1,11 +1,10 @@
 {
   "mcpServers": {
     "lawca": {
-      "command": "server/.venv/Scripts/python.exe",
-      "args": ["server/lawca_server.py"],
-      "env": {
-        "LAWCA_USER_ID": "u_kim",
-        "PYTHONUTF8": "1"
+      "type": "http",
+      "url": "https://<서버 주소>/mcp",
+      "headers": {
+        "Authorization": "Bearer <웹 화면 'AI 연결'에서 발급한 개인 토큰>"
       }
     }
   }

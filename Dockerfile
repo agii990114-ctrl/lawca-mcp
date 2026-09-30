@@ -26,11 +26,13 @@ RUN groupadd -g 10001 app && useradd -u 10001 -g app -m -d /home/app app \
  && node --version
 WORKDIR /srv
 COPY backend/requirements.txt backend/requirements.txt
-RUN pip install -r backend/requirements.txt
+COPY server/requirements.txt server/requirements.txt
+RUN pip install -r backend/requirements.txt -r server/requirements.txt
 COPY backend/__init__.py backend/__init__.py
 COPY backend/app backend/app
 COPY backend/tools/package.json backend/tools/package.json
 COPY --from=tools /tools/node_modules backend/tools/node_modules
+COPY server/db.py server/http_auth.py server/lawca_server.py server/masking.py server/search.py server/
 COPY db/migrate.py db/migrate.py
 COPY db/migrations db/migrations
 COPY --from=web /web/dist frontend/dist

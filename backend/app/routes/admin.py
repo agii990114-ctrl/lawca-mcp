@@ -110,6 +110,7 @@ def patch_user(user_id: str, body: UserPatch, user: dict = Depends(require("user
             c.execute("UPDATE users SET active = %s WHERE user_id = %s", (body.active, user_id))
             if body.active is False:
                 c.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+                c.execute("UPDATE api_tokens SET revoked_at = now() WHERE user_id = %s AND revoked_at IS NULL", (user_id,))
         view = _user_view(c, user_id)
     db.audit(user["user_id"], "update_user", {"target": user_id, **body.model_dump(exclude_none=True)})
     return view
@@ -145,6 +146,7 @@ def reset_password(user_id: str, user: dict = Depends(require("users.manage"))):
                   " ON CONFLICT (user_id) DO UPDATE SET password_hash = EXCLUDED.password_hash, must_change = true, updated_at = now()",
                   (user_id, security.hash_password(temp)))
         c.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+        c.execute("UPDATE api_tokens SET revoked_at = now() WHERE user_id = %s AND revoked_at IS NULL", (user_id,))   # 계정 탈취가 의심되는 상황이므로 에이전트 토큰도 함께 폐기
     db.audit(user["user_id"], "reset_password", {"target": user_id})
     return {"user_id": user_id, "temporary_password": temp, "note": "임시 비밀번호는 지금 한 번만 표시됩니다."}
 
