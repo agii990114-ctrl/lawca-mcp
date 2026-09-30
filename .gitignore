@@ -27,3 +27,6 @@ eval/cwd/
 .dev-credentials.txt
 backend/data/
 frontend/dist/
+
+# 가상 시험 문서(스크립트로 재생성 가능)
+sample-uploads/

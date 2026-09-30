@@ -79,3 +79,12 @@ def test_filed_date_needs_a_signature_block():
     ok = metadata.detect(body + "\n2026. 5. 20.\n피고 소송대리인 변호사 홍길동\n서울중앙지방법원 귀중")
     assert ok["filed_date"] == "2026-05-20"
     assert metadata.detect(body + "\n2026. 5. 20.\n서울중앙지방법원 제12민사부 귀중")["filed_date"] == "2026-05-20"
+
+
+def test_doc_kind_comes_from_the_title_line_only():
+    """본문에 '도급계약서' 같은 단어가 있어도 제목이 '증거설명서'면 계약서로 분류하지 않는다."""
+    d = metadata.detect("증 거 설 명 서\n사 건 2025가합31017 부당이득금\n을 제2호증 도급계약서: 2025. 2. 3. 체결")
+    assert "doc_kind" not in d
+    assert metadata.detect("계 약 서\n제1조 (목적)")["doc_kind"] == "계약서"
+    assert metadata.detect("\n\n  준 비 서 면 (제2차)\n사 건 2025가합1 대여금")["doc_kind"] == "준 비 서 면"
+    assert metadata.detect("준비서면\n의견서를 첨부합니다")["doc_kind"] == "준 비 서 면"      # 본문의 다른 종류 단어에 흔들리지 않는다

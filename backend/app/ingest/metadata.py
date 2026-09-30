@@ -27,8 +27,11 @@ def detect(text: str) -> dict:
     head = _ns(text[:600])
     tail = _ns(text[-500:])
     meta: dict = {}
+    # 문서 종류는 '제목 줄'만 보고 판단한다. 본문에 나오는 단어(예: '도급계약서')로 종류를 추정하면 틀린다.
+    first_line = next((l for l in text.splitlines() if l.strip()), "")
+    title = _ns(first_line)[:40]
     for key, kind in TITLE_KINDS:
-        if key in head[:80]:
+        if key in title:
             meta["doc_kind"] = kind
             break
     m = re.search(r"제(\d{1,2})차", head[:120])
