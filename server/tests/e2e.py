@@ -157,7 +157,9 @@ async def main():
     # 6) 마스킹
     pii = {"주민번호": re.compile(r"\d{6}-[1-8]\d{6}"), "전화": re.compile(r"01\d-\d{3,4}-\d{4}"),
            "이메일": re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "계좌": re.compile(r"\d{2,6}-\d{2,6}-\d{4,8}"),
-           "금액": re.compile(r"\d[\d,]*\s*원(?!고|본|금|인|칙|래|장)")}
+           "금액": re.compile(r"\d[\d,]*\s*원(?!고|본|금|인|칙|래|장)"),
+           # 반쯤 가려진 금액 조각('2억 [금액]'의 앞쪽 '2억')도 누출로 본다. 이전 검사는 완전한 '숫자원'만 찾아 이 결함을 놓쳤다.
+           "금액 조각(억·천만…)": re.compile(r"\d\s*(?:억|천만|백만|십만)"), "금액 조각(만 원)": re.compile(r"\d[\d,]*\s*만\s*원")}
     rows = o.execute("SELECT d.doc_id, m.plaintiff, m.defendant, m.case_no FROM documents d JOIN matters m USING(matter_id)").fetchall()
     leaks = []
     async with client_for("u_admin") as c:
