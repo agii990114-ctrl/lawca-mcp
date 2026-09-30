@@ -1,10 +1,35 @@
+# lawca 전체 스택: DB + 마이그레이션 + API(화면 포함) + 인제스트 워커 + HTTPS 프록시
+#
+# 네트워크 분리(외부 통신 통제):
+#   edge  : 바깥과 연결. 프록시와 '최초 모델 준비'(fetch-models)만 붙는다.
+#   web   : internal. 프록시 ↔ API
+#   data  : internal. API·워커·DB·마이그레이션 — 외부 인터넷으로 나가는 길이 없다.
+#   => 워커(파싱·OCR·임베딩)는 문서 원문을 처리하지만 인터넷에 접근할 수 없다.
+#
+# 시작:  docker compose build
+#        docker compose --profile setup run --rm fetch-models     # 최초 1회(인터넷 필요): 모델을 볼륨에 내려받기
+#        docker compose up -d
+# 개발용 override(docker-compose.override.yml)는 자동으로 적용된다. 운영은 -f docker-compose.yml 만 지정한다.
+name: lawca-mcp
+
+x-app: &app
+  image: lawca-app:local            # 이미지는 api 서비스의 build 로 만든다(나머지는 같은 이미지를 명령만 바꿔 쓴다)
+  pull_policy: never
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+x-db-env: &db-env
+  LAWCA_DB_HOST: db
+  LAWCA_DB_PORT: "5432"
+  LAWCA_DB_NAME: ${LAWCA_DB_NAME:-lawca}
+
 services:
   db:
     image: pgvector/pgvector:pg17
     container_name: lawca-db
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${LAWCA_DB_PORT:-5433}:5432"
     environment:
       POSTGRES_USER: lawca_owner
       POSTGRES_PASSWORD: ${LAWCA_OWNER_PASSWORD}
@@ -14,11 +39,114 @@ services:
     volumes:
       - lawca_pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
+    networks: [data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lawca_owner -d ${LAWCA_DB_NAME:-lawca}"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  # 일회성: 스키마 마이그레이션과 백엔드용 DB 역할 생성. 소유자 비밀번호는 이 컨테이너만 받는다.
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["python", "db/migrate.py"]
+    environment:
+      <<: *db-env
+      LAWCA_OWNER_PASSWORD: ${LAWCA_OWNER_PASSWORD}
+      LAWCA_APP_PASSWORD: ${LAWCA_APP_PASSWORD}
+      LAWCA_WORKER_PASSWORD: ${LAWCA_WORKER_PASSWORD}
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [data]
+
+  api:
+    <<: *app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    environment:
+      <<: *db-env
+      LAWCA_APP_PASSWORD: ${LAWCA_APP_PASSWORD}
+      LAWCA_AUDIT_PASSWORD: ${LAWCA_AUDIT_PASSWORD}
+      LAWCA_COOKIE_SECURE: "1"
+    volumes:
+      - lawca_uploads:/data
+    tmpfs:
+      - /tmp:size=256m
+    depends_on:
+      db: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    networks: [web, data]
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "backend.app.worker"]
+    environment:
+      <<: *db-env
+      LAWCA_WORKER_PASSWORD: ${LAWCA_WORKER_PASSWORD}
+      LAWCA_OFFLINE: "1"            # 임베딩 모델은 캐시에서만 읽는다(kordoc도 항상 오프라인)
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - lawca_uploads:/data
+      - lawca_models:/home/app/.cache
+    tmpfs:
+      - /tmp:size=1g
+    depends_on:
+      db: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    networks: [data]                 # internal: 인터넷 접근 불가
+    mem_limit: 6g
+
+  # 최초 1회(인터넷 필요): 임베딩·OCR 모델을 모델 볼륨에 내려받는다.
+  fetch-models:
+    <<: *app
+    profiles: [setup]
+    restart: "no"
+    command: ["python", "-m", "backend.app.fetch_models"]
+    volumes:
+      - lawca_models:/home/app/.cache
+    tmpfs:
+      - /tmp:size=1g
+    networks: [edge]
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      LAWCA_HOST: ${LAWCA_HOST:-localhost}
+    ports:
+      - "${LAWCA_BIND:-127.0.0.1}:${LAWCA_PORT:-8443}:443"
+    volumes:
+      - ./deploy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [edge, web]
+
+networks:
+  edge: {}
+  web:
+    internal: true
+  data:
+    internal: true
+
 volumes:
   lawca_pgdata:
+  lawca_uploads:
+  lawca_models:
+  caddy_data:
+  caddy_config:

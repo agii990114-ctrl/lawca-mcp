@@ -1,0 +1,11 @@
+# 운영용: HTTPS만 연다. 기본은 Caddy 내부 CA 인증서(`tls internal`, 브라우저에 신뢰 등록 필요).
+# 실제 도메인·사내 인증서를 쓰려면 LAWCA_HOST 를 도메인으로 바꾸고 아래 tls 줄을 인증서 경로로 교체한다:
+#   tls /certs/fullchain.pem /certs/privkey.pem
+{
+	admin off
+}
+
+{$LAWCA_HOST:localhost} {
+	tls internal
+	import /etc/caddy/app.conf
+}

@@ -25,8 +25,8 @@ def _friendly(stderr: str, returncode: int) -> str:
         return "암호로 보호된 문서라 열 수 없습니다. 암호를 해제한 뒤 다시 올려 주세요."
     if "drm" in low or "문서보안" in stderr:
         return "한컴 문서보안(DRM)이 적용된 문서라 열 수 없습니다. 보안을 해제한 뒤 다시 올려 주세요."
-    tail = " ".join(stderr.strip().split())[-160:]
-    return f"문서를 읽지 못했습니다(kordoc 종료 코드 {returncode}). {tail}".strip()
+    # kordoc이 내놓는 원시 오류(JSON 덩어리)는 사용자에게 보여 주지 않는다. 상세는 워커 로그에 남는다.
+    return f"문서를 읽지 못했습니다. 파일이 손상되었거나 지원되지 않는 형식일 수 있습니다(변환 도구 종료 코드 {returncode}). 원본을 확인해 다시 올려 주세요."
 
 
 def parse_file(stored_path: str, ext: str) -> tuple[str, dict]:

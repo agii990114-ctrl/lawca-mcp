@@ -24,7 +24,7 @@
 
 ```bash
 cp .env.example .env               # 개발용 비밀번호로 수정
-docker compose up -d               # DB (127.0.0.1:5433)
+docker compose up -d db            # DB만 (127.0.0.1:5433, 개발용 override). 전체 스택은 아래 '컨테이너로 실행'
 python -m venv server/.venv && server/.venv/Scripts/python -m pip install -r server/requirements.txt
 server/.venv/Scripts/python db/load_dummy.py     # 더미 적재 + 로컬 임베딩(약 7분, 최초 1회 모델 다운로드)
 server/.venv/Scripts/python db/verify.py         # 스키마·RLS·권한 검증
@@ -44,6 +44,32 @@ backend/.venv/Scripts/python -m uvicorn backend.app.main:app --host 127.0.0.1 --
 backend/.venv/Scripts/python -m backend.app.worker     # 인제스트 워커(별도 프로세스, 여러 개 가능)
 backend/.venv/Scripts/python -m pytest                 # 백엔드 테스트 46+개
 ```
+
+### 컨테이너로 실행 (운영 권장)
+
+| 컨테이너 | 역할 | 외부 통신 |
+|---|---|---|
+| `proxy` (Caddy) | 브라우저의 유일한 입구: https, 업로드 상한, 보안 헤더(CSP 등) | 가능 |
+| `api` | FastAPI: 로그인·사건·문서·업로드 접수, 빌드된 화면 서빙 | **차단** |
+| `worker` | 문서 변환·OCR·청킹·임베딩·저장(원문을 가장 많이 다룸) | **차단** |
+| `db` | PostgreSQL + pgvector, 접근 그룹 권한(RLS) 강제 | **차단** |
+| `migrate` | (일회성) 스키마 마이그레이션·앱용 DB 계정 생성 — 소유자 비밀번호를 가진 유일한 앱 컨테이너 | 차단 |
+| `fetch-models` | (일회성, 최초 1회) 임베딩·OCR 모델을 볼륨에 내려받기 | 가능 |
+
+```bash
+docker compose build
+docker compose --profile setup run --rm fetch-models         # 최초 1회, 인터넷 필요(임베딩 모델 약 2.2GB + OCR 모델)
+docker compose -f docker-compose.yml up -d                   # 운영: https 만 공개(127.0.0.1:8443). 개발은 -f 없이 up -d
+docker compose -f docker-compose.yml run --rm migrate python -m backend.app.manage create-admin --user-id admin --name "관리자"
+```
+
+- 워커·API·DB는 `internal` 네트워크에만 붙어 **인터넷에 나갈 수 없다**(문서 원문이 사내 밖으로 나가지 않는다는 원칙을 인프라로 강제). 모델은 위 준비 단계에서 미리 받아 둔다.
+- 모든 앱 컨테이너는 비root(uid 10001)·읽기 전용 루트 파일시스템·`cap_drop: ALL`. 컨테이너마다 필요한 DB 비밀번호만 받는다(API는 소유자·워커 비밀번호가 없다).
+- 개발용 `docker-compose.override.yml`(자동 적용)은 DB 포트(127.0.0.1:5433)와 평문 HTTP(127.0.0.1:8081)를 추가로 연다. **운영에서는 `-f docker-compose.yml` 로 이 파일을 쓰지 않는다.**
+- https 인증서: 기본은 Caddy 내부 CA(`tls internal`, 브라우저에 신뢰 등록 필요). 실제 도메인·사내 인증서는 `LAWCA_HOST`와 `deploy/Caddyfile`의 `tls` 줄을 바꾼다. 외부에 공개하려면 `LAWCA_BIND=0.0.0.0`.
+- 볼륨: `lawca_pgdata`(DB), `lawca_uploads`(업로드 원본), `lawca_models`(모델), `caddy_data`. **백업 대상은 앞의 두 개**이며 함께 백업해야 일관된다.
+- 백엔드 테스트는 워커 컨테이너가 같은 DB의 업로드 작업을 집어 가지 않도록 `docker compose stop worker` 후 실행하는 것이 확실하다.
+- MCP 서버(에이전트용 도구)는 아직 컨테이너화하지 않았다.
 
 프런트 개발 서버는 `npm run dev`(포트 5173, `/api`를 8000으로 프록시). 운영에서는 **https 리버스 프록시 뒤에서** `LAWCA_COOKIE_SECURE=1`로 실행하고, 프록시에 요청 본문 상한(`client_max_body_size`)을 설정하세요.
 

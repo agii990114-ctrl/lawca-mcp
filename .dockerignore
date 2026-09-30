@@ -1,0 +1,18 @@
+# 빌드 컨텍스트에 비밀·큰 파일·개발 산출물을 넣지 않는다
+.git
+.env
+.env.*
+.dev-credentials.txt
+.claude
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+backend/data
+backend/tests
+frontend/dist
+parse-test
+eval
+dummy-data
+server
+*.log

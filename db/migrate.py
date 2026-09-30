@@ -15,7 +15,8 @@ import psycopg
 from psycopg import sql
 
 ROOT = Path(__file__).resolve().parent.parent
-env = dict(l.strip().split("=", 1) for l in (ROOT / ".env").read_text().splitlines() if "=" in l)
+_envfile = ROOT / ".env"      # 컨테이너에는 .env 가 없고 환경변수로 받는다
+env = dict(l.strip().split("=", 1) for l in _envfile.read_text().splitlines() if "=" in l) if _envfile.exists() else {}
 env.update({k: v for k, v in os.environ.items() if k.startswith("LAWCA_")})
 DSN = (f"host={env.get('LAWCA_DB_HOST', '127.0.0.1')} port={env['LAWCA_DB_PORT']} dbname={env['LAWCA_DB_NAME']} "
        f"user=lawca_owner password={env['LAWCA_OWNER_PASSWORD']}")

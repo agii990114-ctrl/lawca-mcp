@@ -1,0 +1,16 @@
+# 개발용: HTTPS 사이트에 더해 평문 HTTP(:80)도 연다. docker-compose.override.yml 이 이 파일을 쓰고 127.0.0.1:8081 로만 공개한다.
+# 운영 배포에서는 이 파일과 override 를 쓰지 않는다.
+{
+	admin off
+	# 개발용: localhost 에 대한 자동 http→https 리다이렉트를 끈다(평문 HTTP 사이트로 바로 접속)
+	auto_https disable_redirects
+}
+
+{$LAWCA_HOST:localhost} {
+	tls internal
+	import /etc/caddy/app.conf
+}
+
+http://:80 {
+	import /etc/caddy/app.conf
+}

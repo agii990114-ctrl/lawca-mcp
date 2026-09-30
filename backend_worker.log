@@ -18,3 +18,38 @@
 2026-09-30 13:36:54,503 INFO 작업 처리 결과: failed
 2026-09-30 13:36:55,078 INFO 작업 처리 결과: failed
 2026-09-30 13:36:55,612 INFO 작업 처리 결과: failed
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\app\worker.py", line 37, in <module>
+    main()
+    ~~~~^^
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\app\worker.py", line 27, in main
+    result = pipeline.process_one(conn, worker_id)
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\app\ingest\pipeline.py", line 156, in process_one
+    job = claim(conn, worker_id)
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\app\ingest\pipeline.py", line 31, in claim
+    with conn.transaction():
+         ~~~~~~~~~~~~~~~~^^
+  File "C:\Python314\Lib\contextlib.py", line 141, in __enter__
+    return next(self.gen)
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\.venv\Lib\site-packages\psycopg\connection.py", line 369, in transaction
+    with tx:
+         ^^
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\.venv\Lib\site-packages\psycopg\transaction.py", line 260, in __enter__
+    self._conn.wait(self._enter_gen())
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\.venv\Lib\site-packages\psycopg\connection.py", line 495, in wait
+    return waiting.wait(
+           ~~~~~~~~~~~~^
+        gen, self.pgconn.socket, interval=interval, timeout=timeout
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\.venv\Lib\site-packages\psycopg\waiting.py", line 363, in wait_select
+    s = gen.send(ready)
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\.venv\Lib\site-packages\psycopg\transaction.py", line 106, in _enter_gen
+    yield from self._conn._exec_command(command)
+  File "E:\JIHWAN\IDE\workplace\lawca-mcp\backend\.venv\Lib\site-packages\psycopg\_connection_base.py", line 487, in _exec_command
+    raise e.error_from_result(result, encoding=self.pgconn._encoding)
+psycopg.errors.AdminShutdown: terminating connection due to administrator command

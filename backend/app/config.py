@@ -18,8 +18,13 @@ ENV = _load_env()
 
 
 def _dsn(user: str, pw_key: str) -> str:
+    """해당 계정의 비밀번호가 이 프로세스에 주어졌을 때만 DSN을 만든다.
+    컨테이너는 자기 역할에 필요한 비밀번호만 받는다(예: API는 소유자·워커 비밀번호를 갖지 않는다). 없으면 빈 문자열."""
+    pw = ENV.get(pw_key)
+    if not pw:
+        return ""
     return (f"host={ENV.get('LAWCA_DB_HOST', '127.0.0.1')} port={ENV['LAWCA_DB_PORT']} dbname={ENV['LAWCA_DB_NAME']} "
-            f"user={user} password={ENV[pw_key]}")
+            f"user={user} password={pw}")
 
 
 APP_DSN = _dsn("lawca_app", "LAWCA_APP_PASSWORD")          # API: RLS 적용, 최소 권한
@@ -52,3 +57,5 @@ KORDOC_CLI = ROOT / "backend" / "tools" / "node_modules" / "kordoc" / "dist" / "
 PARSE_TIMEOUT_SEC = int(ENV.get("LAWCA_PARSE_TIMEOUT_SEC", "600"))
 MAX_JOB_ATTEMPTS = 3
 EMBED_MODEL = "intfloat/multilingual-e5-large"
+MODEL_CACHE = ENV.get("FASTEMBED_CACHE_PATH") or os.environ.get("FASTEMBED_CACHE_PATH")   # 컨테이너: 모델 볼륨
+OFFLINE = ENV.get("LAWCA_OFFLINE", "0") == "1"   # 1이면 임베딩 모델을 캐시에서만 읽는다(외부 다운로드 시도 금지)

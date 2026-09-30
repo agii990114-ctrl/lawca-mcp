@@ -141,6 +141,7 @@ def test_unreadable_file_fails_with_reason_and_can_be_retried(login):
     run_worker()
     job = a.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "failed" and job["reason"], job
+    assert "{" not in job["reason"] and "success" not in job["reason"], job["reason"]      # 변환 도구의 원시 오류는 노출하지 않는다
     assert login("t_clerk_a").post(f"/api/jobs/{job_id}/retry").status_code == 200        # 사무원도 재시도 가능(jobs.manage)
     assert a.get(f"/api/jobs/{job_id}").json()["status"] == "queued"
     assert a.post(f"/api/jobs/{job_id}/retry").status_code == 409                          # 실패 상태가 아니면 재시도 불가
