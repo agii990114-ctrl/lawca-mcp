@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "lawca": {
+      "command": "server/.venv/Scripts/python.exe",
+      "args": ["server/lawca_server.py"],
+      "env": {
+        "LAWCA_USER_ID": "u_kim",
+        "PYTHONUTF8": "1"
+      }
+    }
+  }
+}

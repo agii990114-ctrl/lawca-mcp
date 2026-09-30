@@ -1,0 +1,24 @@
+# 비밀·환경
+.env
+
+# 가상환경·의존성
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# 실험 생성물(스크립트로 재생성 가능, 용량 큼)
+parse-test/out/
+parse-test/samples/scan.*
+parse-test/big/png/
+parse-test/big/ocr/
+parse-test/big/*.npy
+parse-test/corpus/png/
+parse-test/corpus/ocr/
+parse-test/real/png/
+parse-test/real/ocr/
+
+# 에이전트 시험: 전체 대화 로그(용량 큼, 도구 결과 전문 포함)와 작업 디렉터리
+eval/runs/*.jsonl
+eval/runs/*.stderr.txt
+eval/cwd/

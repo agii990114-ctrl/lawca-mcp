@@ -1,0 +1,33 @@
+
+### OCR 원본 텍스트 — 라우팅
+방식                                | 주제 hit@1 nDCG10 | 사건번호 hit@1 MRR | 당사자 hit@1 MRR | 금액 hit@1 MRR 
+키워드 단독                            | 0.94 0.96  | 1.00 1.00  | 1.00 1.00  | 0.87 0.88  
+임베딩(e5-large) 단독                  | 0.86 0.83  | 0.43 0.53  | 0.17 0.26  | 0.27 0.43  
+하이브리드 RRF (기준선)                   | 0.97 0.95  | 0.77 0.83  | 0.47 0.58  | 0.57 0.68  
+하이브리드 + 식별자 라우팅                   | 0.97 0.95  | 1.00 1.00  | 1.00 1.00  | 0.87 0.89  
+  + 금액 1글자 오차 허용                  | 0.97 0.95  | 1.00 1.00  | 1.00 1.00  | 0.83 0.87  
+   (식별자가 추출되어 라우팅된 질의: 90/180, 실제 식별자 질의 90개)
+   식별자 추출 오탐(주제 질의 중 라우팅됨): 0
+
+### OCR 원본 텍스트 — 리랭커(상위 20개 재정렬)
+방식                                | 주제 hit@1 nDCG10 | 사건번호 hit@1 MRR | 당사자 hit@1 MRR | 금액 hit@1 MRR 
+Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]E:\JIHWAN\IDE\workplace\lawca-mcp\parse-test\.venv\Lib\site-packages\huggingface_hub\file_download.py:149: UserWarning: `huggingface_hub` cache-system uses symlinks by default to efficiently store duplicated files but your machine does not support them in C:\Users\KIM\AppData\Local\Temp\fastembed_cache. Caching files will still work but in a degraded version that might require more space on your disk. This warning can be disabled by setting the `HF_HUB_DISABLE_SYMLINKS_WARNING` environment variable. For more details, see https://huggingface.co/docs/huggingface_hub/how-to-cache#limitations.
+To support symlinks on Windows, you either need to activate Developer Mode or to run Python as an administrator. In order to activate developer mode, see this article: https://docs.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development
+  warnings.warn(message)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+E:\JIHWAN\IDE\workplace\lawca-mcp\parse-test\.venv\Lib\site-packages\huggingface_hub\file_download.py:149: UserWarning: `huggingface_hub` cache-system uses symlinks by default to efficiently store duplicated files but your machine does not support them in C:\Users\KIM\AppData\Local\Temp\fastembed_cache\models--jinaai--jina-reranker-v2-base-multilingual. Caching files will still work but in a degraded version that might require more space on your disk. This warning can be disabled by setting the `HF_HUB_DISABLE_SYMLINKS_WARNING` environment variable. For more details, see https://huggingface.co/docs/huggingface_hub/how-to-cache#limitations.
+To support symlinks on Windows, you either need to activate Developer Mode or to run Python as an administrator. In order to activate developer mode, see this article: https://docs.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development
+  warnings.warn(message)
+Fetching 5 files:  20%|██        | 1/5 [00:00<00:01,  3.08it/s]Fetching 5 files:  80%|████████  | 4/5 [00:12<00:03,  3.42s/it]Fetching 5 files: 100%|██████████| 5/5 [00:54<00:00, 14.11s/it]Fetching 5 files: 100%|██████████| 5/5 [00:54<00:00, 10.91s/it]
+   [jina-reranker-v2-base-multilingual] 3600쌍 280s
+하이브리드+리랭커 [jina-reranker-v2-base-multilingual]| 0.96 0.96  | 1.00 1.00  | 0.63 0.71  | 0.83 0.87  
+   [jina-reranker-v2-base-multilingual] 1800쌍 143s
+라우팅 후 주제질의만 리랭커 [jina-reranker-v2-base-multilingual]| 0.96 0.96  | 1.00 1.00  | 1.00 1.00  | 0.83 0.87  
+Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]E:\JIHWAN\IDE\workplace\lawca-mcp\parse-test\.venv\Lib\site-packages\huggingface_hub\file_download.py:149: UserWarning: `huggingface_hub` cache-system uses symlinks by default to efficiently store duplicated files but your machine does not support them in C:\Users\KIM\AppData\Local\Temp\fastembed_cache\models--BAAI--bge-reranker-base. Caching files will still work but in a degraded version that might require more space on your disk. This warning can be disabled by setting the `HF_HUB_DISABLE_SYMLINKS_WARNING` environment variable. For more details, see https://huggingface.co/docs/huggingface_hub/how-to-cache#limitations.
+To support symlinks on Windows, you either need to activate Developer Mode or to run Python as an administrator. In order to activate developer mode, see this article: https://docs.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development
+  warnings.warn(message)
+Fetching 5 files:  20%|██        | 1/5 [00:00<00:01,  3.25it/s]Fetching 5 files:  60%|██████    | 3/5 [00:00<00:00,  6.42it/s]Fetching 5 files:  80%|████████  | 4/5 [00:03<00:01,  1.23s/it]Fetching 5 files: 100%|██████████| 5/5 [01:58<00:00, 38.80s/it]Fetching 5 files: 100%|██████████| 5/5 [01:58<00:00, 23.71s/it]
+   [bge-reranker-base] 3600쌍 258s
+하이브리드+리랭커 [bge-reranker-base]     | 0.77 0.80  | 1.00 1.00  | 0.67 0.73  | 0.80 0.83  
+   [bge-reranker-base] 1800쌍 137s
+라우팅 후 주제질의만 리랭커 [bge-reranker-base]| 0.77 0.80  | 1.00 1.00  | 1.00 1.00  | 0.83 0.87  
