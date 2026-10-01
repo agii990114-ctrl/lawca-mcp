@@ -21,6 +21,8 @@ parse-test/real/ocr/
 # 에이전트 시험: 전체 대화 로그(용량 큼, 도구 결과 전문 포함)와 작업 디렉터리
 eval/runs/*.jsonl
 eval/runs/*.stderr.txt
+eval/runs/*.log
+eval/runs/brief_eval/*/*.jsonl
 eval/cwd/
 
 # 개발용 계정 비밀번호, 업로드 저장소
