@@ -25,7 +25,7 @@ import citations  # noqa: E402
 
 OUT = ROOT / "eval" / "runs" / "brief_eval"
 MCP_CFG = ROOT / "eval" / "cwd" / "mcp_u_kim.json"
-TOOLS = "mcp__lawca__list_matters,mcp__lawca__search_documents,mcp__lawca__get_document,mcp__lawca__check_citation,Read,Glob"
+TOOLS = "mcp__lawca__list_matters,mcp__lawca__search_documents,mcp__lawca__get_document,mcp__lawca__check_citation,mcp__lawca__get_case,mcp__lawca__get_statute,mcp__lawca__search_cases,Read,Glob"
 OWN_CASE = "2026가단88001"
 
 PROMPTS = {

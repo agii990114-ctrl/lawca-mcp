@@ -1,4 +1,4 @@
-"""법무법인 AI 업무 지원 MCP 서버 (MVP): list_matters, search_documents, get_document, check_citation
+"""법무법인 AI 업무 지원 MCP 서버 (MVP): list_matters, search_documents, get_document, check_citation, get_case, get_statute, search_cases
 
 실행
   운영(HTTP): python server/lawca_server.py --transport http --port 8001   (프록시 뒤, 웹에서 발급한 개인 토큰으로 인증)
@@ -7,6 +7,7 @@
 - 모든 호출은 감사 로그에 남는다(기록 실패 시 호출도 실패).
 - 참고 서면 본문은 기본적으로 마스킹된 상태로만 나간다.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -20,11 +21,12 @@ from search import search as run_search  # noqa: E402
 import citations  # noqa: E402
 import docparts  # noqa: E402
 import law_api  # noqa: E402
+import query_guard  # noqa: E402
 
 INSTRUCTIONS = """법무법인 내부 사건 DB와 서면 검색 서버입니다 (프로토타입, 데이터는 전부 가상의 더미입니다).
 
 권장 흐름: (1) list_matters로 접근 가능한 사건 파악 → (2) search_documents로 유사 서면 검색 →
-(3) get_document로 확인(긴 서면은 sections를 보고 필요한 섹션만 section 인자로) → (4) 초안 작성. 초안의 모든 주장에는 출처(doc_id, 섹션)를 붙이고,
+(3) get_document로 확인(긴 서면은 sections를 보고 필요한 섹션만 section 인자로) → (4) 필요하면 search_cases·get_case·get_statute로 공개 판례·조문 확인 → (5) 초안 작성. 초안의 모든 주장에는 출처(doc_id, 섹션)를 붙이고,
 검색 결과에 근거가 없으면 '근거 없음'이라고 답하세요.
 
 규칙:
@@ -40,6 +42,8 @@ INSTRUCTIONS = """법무법인 내부 사건 DB와 서면 검색 서버입니다
 3. 증거의 내용을 단정하지 마세요. 자료에 입증 취지만 있고 실제 내용이 없는 증거는 "입증 취지: …"로만 쓰고 [확인 필요: 실제 내용 대조]를 붙이세요.
 4. 자료에 없는 논리·주장·절차(예: 금액이 적다는 주장, 증거신청)는 본문에 넣지 말고 '변호사 검토 사항'에 제안과 위험으로 적으세요.
 5. 조문·판례는 check_citation으로 확인하고 ok_to_cite가 true인 것만 본문에 쓰세요. 나머지는 본문에서 빼서 검토 사항에 '확인 필요'로 옮기세요.
+   판례가 필요하면 search_cases(법률 쟁점·용어만, 사건 정보 금지)로 찾고 get_case로 요지를 읽은 뒤 서면에 쓰세요. 조문은 get_statute로 실제 문구를 확인하세요.
+   check_citation의 holding_warning이 있으면 서면에 쓴 요지가 판례와 맞지 않을 수 있으니 official을 보고 고치거나 빼세요.
    확인되지 않은 판례를 기억에 의존해 인용하지 마세요. 사용자가 확인된 조문 목록을 주었다면 그 밖의 조문은 [조문 확인 필요]로 표시하세요.
 6. 날짜·기간 계산(시효 등)은 표로 먼저 보여 주고 유불리를 솔직하게 평가하세요. 계산의 근거 조문이 확인되지 않았으면 그렇게 밝히세요.
 7. 제출일은 비워 두고(2026. [ ]. [ ].) 자료의 기한을 제출일로 채우지 마세요. 입증방법에는 자료의 증거 목록에 있는 것만 쓰세요.
@@ -268,22 +272,22 @@ def get_document(doc_id: str, mask: bool = True, section: str | None = None, par
 
 @mcp.tool()
 def check_citation(text: str) -> dict:
-    """서면 초안(또는 인용 문장)에 들어 있는 판례·조문이 실제로 존재하는지 확인합니다.
+    """서면 초안(또는 인용 문장)에 들어 있는 판례·조문이 실제로 있는지, 서면이 쓴 판례 요지가 맞아 보이는지 확인합니다.
 
     - text: 인용이 들어 있는 텍스트(초안 전체 또는 인용 부분). 사건번호(예: 2004다59959), 선고일(2005. 2. 17.), 조문(민법 제168조 제3호)을 자동으로 찾습니다.
       최대 50,000자, 인용 50건. 서면에 쓴 문장을 그대로 넘기면 됩니다(사건 정보는 저장되지 않으며 감사 로그에는 인용 수와 판정 건수만 남습니다).
 
     판정(status):
     - verified_registry: 사무소 등록부(변호사 확인 목록)에 있음
-    - verified_external: 외부 조회로 사건번호가 실재함(설정된 경우만)
+    - verified_external: 법제처 조회로 확인됨(판례: 사건번호·선고일 일치, 조문: 현행 조문 존재)
     - date_mismatch: 사건번호는 있으나 선고일이 다름 → 틀린 인용, 수정 또는 삭제
-    - not_found: 외부 조회에서 확인되지 않음 → 존재하지 않을 수 있음, 본문에서 삭제
+    - not_found: 법제처에서 확인되지 않음(판례 번호 없음, 또는 그 법령에 그 조문·항이 없음) → 본문에서 삭제
     - inconsistent: 선고일이 사건 연도보다 앞서거나 미래 → 틀린 인용
     - unverified: 확인 수단이 없음 → 본문에 넣지 말고 검토 사항으로
 
-    ok_to_cite가 true인 인용만 서면 본문에 쓰세요. 이 도구는 '그런 판례·조문이 있는가, 번호와 날짜가 맞는가'만 확인합니다.
-    판시 요지가 원문과 같은지(holding_checked=false), 조문이 현행인지는 확인하지 못하므로 변호사가 원문으로 대조해야 합니다.
-    registered_summary가 있으면 서면에 쓴 요지와 비교해 보세요.
+    ok_to_cite가 true인 인용만 서면 본문에 쓰세요. 판례 결과의 official(법제처의 판시사항·판결요지)은 서면에 쓴 요지와 대조하는 용도이며,
+    holding_warning이 있으면 서면의 요지 문장이 판례 내용과 거의 겹치지 않는다는 뜻이니 요지를 고치거나 삭제하세요.
+    holding_overlap은 휴리스틱이라 같은 분야의 조금 다른 요지는 못 잡습니다. 판시 요지의 정확성은 변호사가 원문(get_case)으로 대조해야 합니다.
     """
     uid = _uid()
     if len(text) > 50_000:
@@ -296,37 +300,153 @@ def check_citation(text: str) -> dict:
         results = []
         ext_on = law_api.configured()
         ext_dead = False
+        detail_budget = 8                       # 판례 본문 조회는 한 번에 8건까지(지연·외부 호출 제한)
         for c in cits:
             reg = conn.execute("SELECT label, summary, decision_date FROM verified_citations WHERE kind=%s AND key=%s",
                                (c["kind"], c["key"])).fetchone()
             ext, state = None, ("ok" if ext_on else "off")
-            if c["kind"] == "case" and not reg and ext_on and not ext_dead:
+            if ext_on and not ext_dead and (c["kind"] == "case" or (c["kind"] == "statute" and c.get("law") and not reg)):
                 try:
-                    ext = law_api.find_case(c["key"])
+                    if c["kind"] == "case" and not reg:
+                        ext = law_api.find_case(c["key"])
+                    elif c["kind"] == "statute":
+                        art = re.search(r"제\d+조(?:의\d+)?$", c["key"])
+                        ext = law_api.statute(c["law"], art.group(0)) if art else None
                 except law_api.LawApiError:
                     ext_dead = True          # 한 번 실패하면 나머지는 시도하지 않는다(지연 방지)
-            if c["kind"] == "case" and not reg and ext_on and ext_dead:
+            if ext_on and ext_dead and not reg and (c["kind"] == "case" or c.get("law")):
                 state = "error"
-            results.append(citations.evaluate(c, dict(reg) if reg else None, ext, state))
+            r = citations.evaluate(c, dict(reg) if reg else None, ext, state)
+            if c["kind"] == "case" and r.get("ok_to_cite") and ext_on and not ext_dead and detail_budget > 0:
+                detail_budget -= 1
+                try:
+                    r = citations.enrich_case(r, law_api.case_detail(c["key"]), text, c["raw"])
+                except law_api.LawApiError:
+                    ext_dead = True
+            results.append(r)
     finally:
         conn.close()
     counts = citations.summarize(results)
     db.audit(uid, "check_citation", {"n": len(results), "counts": counts, "external": law_api.configured()}, [], len(results))
     resp = {"count": len(results), "counts": counts, "results": results,
-            "notice": "확인 범위는 인용의 존재와 번호·선고일 일치까지입니다. 판시 요지·조문 내용은 변호사가 원문으로 대조해야 합니다."}
+            "notice": "확인 범위는 인용의 존재, 번호·선고일 일치, 조문 현행 여부와 판례 요지의 대략적 일치입니다. 판시 요지의 정확성은 변호사가 원문으로 대조해야 합니다."}
     if not results:
         resp["note_empty"] = "텍스트에서 판례·조문 인용을 찾지 못했습니다."
     bad = [r["citation"] for r in results if not r["ok_to_cite"]]
     if bad:
         resp["action"] = "ok_to_cite가 false인 인용은 서면 본문에서 빼고 '변호사 검토 사항'에 확인 필요로 옮기세요: " + ", ".join(bad)
+    warn = [r["citation"] for r in results if r.get("holding_warning")]
+    if warn:
+        resp["holding_action"] = "서면의 요지가 판례 내용과 맞지 않아 보이는 인용: " + ", ".join(warn) + ". official을 보고 요지를 고치거나 인용을 빼세요."
     return resp
 
 
-@mcp.prompt()
-def draft_brief(doc_kind: str = "준비서면") -> str:
-    """사건 자료를 바탕으로 서면 초안 작성을 시작합니다(슬래시 명령으로 선택). 사건 자료 파일을 먼저 첨부하거나 폴더를 지정하세요."""
-    return (f"첨부하거나 지정한 사건 자료를 모두 읽고 이 사건의 제1차 {doc_kind} 초안을 작성해 주세요. "
-            "서버 지침의 서면 작성 규칙(자료 밖 사실·증거 금지, 인용은 check_citation 확인, 제출일 비움, 검토 사항 분리)을 따르세요.")
+def _external_unavailable() -> dict:
+    return {"error": "법제처 조회가 설정되지 않았거나 일시적으로 사용할 수 없습니다. 판례·조문은 변호사가 직접 확인해야 합니다."}
+
+
+@mcp.tool()
+def get_case(case_no: str, part: int | None = None) -> dict:
+    """공개 판례(법제처 국가법령정보)를 사건번호로 조회합니다: 판시사항, 판결요지, 참조조문, 참조판례, 판결 본문.
+
+    - case_no: 사건번호(예: "2004다59959"). 대법원·고등법원 등 법제처에 수록된 판례만 조회됩니다. 외부로 나가는 것은 이 사건번호뿐입니다.
+    - part: 본문이 길면 약 8,000자 단위로 나눠 돌려줍니다(1부터). 기본은 1부.
+
+    용도: 서면에 인용할 판례의 요지를 원문과 대조하거나, search_cases로 찾은 판례의 내용을 읽을 때. 이 사무소의 사건·서면이 아니라 공개 판례입니다.
+    인용 전에는 check_citation을 통과해야 합니다. 법제처에 없는 판례는 '존재하지 않음'이 아니라 '수록되지 않음'일 수 있습니다.
+    """
+    uid = _uid()
+    if not citations.CASE_NO_OK.match((case_no or "").replace(" ", "")):
+        return {"error": "사건번호 형식이 올바르지 않습니다(예: 2004다59959)."}
+    case_no = case_no.replace(" ", "")
+    if not law_api.configured():
+        return _external_unavailable()
+    try:
+        d = law_api.case_detail(case_no)
+    except law_api.LawApiError:
+        return _external_unavailable()
+    db.audit(uid, "get_case", {"case_no": case_no, "found": d is not None, "part": part}, [], 1 if d else 0)
+    if d is None:
+        return {"found": False, "case_no": case_no,
+                "note": "법제처 판례 DB에서 찾지 못했습니다. 번호가 틀렸거나 수록되지 않은 판례일 수 있습니다. 서면에 인용하지 마세요."}
+    try:
+        body, cur, total = docparts.pick_part(d.get("body") or "", part)
+    except ValueError as e:
+        return {"error": str(e)}
+    resp = {"found": True, "case_no": d["case_no"], "court": d["court"], "decision_date": d["decision_date"].isoformat() if d.get("decision_date") else None,
+            "label": d["label"], "issue": d["issue"], "holding": d["holding"], "ref_statutes": d["ref_statutes"], "ref_cases": d["ref_cases"],
+            "body": body, "part": cur, "total_parts": total, "source": "법제처 국가법령정보 공개 API"}
+    if total > 1:
+        resp["next_part_hint"] = f"본문이 깁니다. 지금은 {cur}/{total}부입니다. part를 올려 이어서 읽으세요."
+    resp["notice"] = "공개 판례의 법제처 수록본입니다. 서면에 옮길 때는 변호사가 원문과 대조해야 합니다."
+    return resp
+
+
+@mcp.tool()
+def get_statute(law_name: str, article: str) -> dict:
+    """법령의 조문 본문을 조회합니다(법제처 현행 법령): 조문 텍스트, 항·호, 시행일, 개정 구분.
+
+    - law_name: 정식 법령명(예: "민법", "민사소송법", "상법"). 약칭은 못 찾을 수 있습니다.
+    - article: 조문 번호(예: "제168조", "제174조의2"). 항·호는 넣지 말고 조문 전체를 읽으세요.
+    외부로 나가는 것은 법령명과 조문 번호뿐입니다. 서면에 인용하기 전에 이 도구로 조문의 실제 문구를 확인하세요.
+    """
+    uid = _uid()
+    art = re.sub(r"\s+", "", article or "")
+    if not re.fullmatch(r"제\d{1,4}조(?:의\d{1,2})?", art):
+        return {"error": "조문 번호는 '제168조', '제174조의2' 형식으로 쓰세요."}
+    if not re.fullmatch(r"[가-힣A-Za-z0-9·ㆍ ]{2,40}", (law_name or "").strip()):
+        return {"error": "법령명 형식이 올바르지 않습니다. 정식 법령명만 쓰세요(예: 민법)."}
+    if not law_api.configured():
+        return _external_unavailable()
+    try:
+        d = law_api.statute(law_name.strip(), art)
+    except law_api.LawApiError:
+        return _external_unavailable()
+    db.audit(uid, "get_statute", {"law": law_name.strip(), "article": art, "found": "missing" not in d}, [], 0 if "missing" in d else 1)
+    if "missing" in d:
+        msg = ("그 법령명을 찾지 못했습니다. 정식 법령명으로 다시 쓰세요." if d["missing"] == "law_not_found"
+               else "그 법령에 해당 조문이 없습니다. 조문 번호를 확인하세요.")
+        return {"found": False, "reason": d["missing"], "note": msg}
+    return {"found": True, "law": d["law"], "article": d["article"], "title": d["title"], "text": d["text"],
+            "paragraphs": d["paragraphs"], "effective_date": d["effective_date"].isoformat() if d.get("effective_date") else None,
+            "revision": d["revision"], "source": "법제처 국가법령정보 공개 API",
+            "notice": "현행 조문입니다. 사건 행위 당시의 법이 다를 수 있으니 시행일과 개정 이력을 변호사가 확인해야 합니다."}
+
+
+@mcp.tool()
+def search_cases(query: str, limit: int = 5) -> dict:
+    """공개 판례를 키워드로 검색합니다(법제처 국가법령정보, 판례 본문 검색). 결과는 사건번호·법원·선고일·사건명 목록입니다.
+
+    ★ query는 법제처 서버로 그대로 전송됩니다. 반드시 **법률 쟁점·법률 용어만** 쓰세요.
+      좋은 예: "소멸시효 채무승인 문자메시지", "유치권 하도급대금", "임대차 보증금 반환 동시이행"
+      쓰면 안 되는 것: 당사자 이름, 상호, 주소, 사건번호, 금액, 전화번호, 사건의 구체적 사실관계(누가·언제·어디서). 사건 특징을 풀어 쓰지 마세요.
+      50자 이내, 한 줄. 이런 값이 보이면 서버가 거부하고 이유를 알려 주니 고쳐서 다시 요청하세요.
+    - limit: 최대 10(기본 5)
+
+    결과의 사건번호로 get_case를 호출해 판시사항·본문을 읽을 수 있습니다. 검색 결과에 나온 판례도 서면에 인용하기 전에는 check_citation을 통과해야 합니다.
+    검색어는 감사 로그에 그대로 기록됩니다(외부로 나간 정보이므로).
+    """
+    uid = _uid()
+    limit = max(1, min(int(limit), 10))
+    ok, reason = query_guard.check_query(query)
+    db.audit(uid, "search_cases", {"query": (query or "")[:120], "limit": limit, "accepted": ok, "reason": None if ok else reason}, [], 0)
+    if not ok:
+        return {"rejected": True, "reason": reason, "hint": query_guard.HINT}
+    if not law_api.configured():
+        return _external_unavailable()
+    try:
+        r = law_api.search_cases(query.strip(), limit)
+    except law_api.LawApiError:
+        return _external_unavailable()
+    if r.get("rejected"):                                   # 중계의 마지막 검사에서 걸린 경우
+        return {"rejected": True, "reason": r.get("reason"), "hint": query_guard.HINT}
+    items = [{"case_no": i["case_no"], "court": i.get("court"), "decision_date": i["decision_date"].isoformat() if i.get("decision_date") else None,
+              "label": i.get("label")} for i in r["items"]]
+    resp = {"total": r["total"], "shown": len(items), "items": items,
+            "note": "검색 결과는 후보일 뿐입니다. 내용은 get_case로 읽고, 인용 전에는 check_citation을 통과하세요."}
+    if not items:
+        resp["note_empty"] = "검색 결과가 없습니다. 더 일반적인 법률 용어로 바꿔 보세요."
+    return resp
 
 
 def run_http(host: str, port: int) -> None:

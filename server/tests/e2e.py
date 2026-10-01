@@ -48,7 +48,7 @@ async def main():
     async with client_for("u_admin") as c:
         tools = await c.list_tools()
         names = sorted(t.name for t in tools.tools)
-        check("도구 목록", names == ["check_citation", "get_document", "list_matters", "search_documents"], names)
+        check("도구 목록", names == ["check_citation", "get_case", "get_document", "get_statute", "list_matters", "search_cases", "search_documents"], names)
         desc = {t.name: t.description for t in tools.tools}
         check("도구 설명에 식별자 전용 인자·OCR 한계 안내 포함",
               "정확 일치" in desc["search_documents"] and "OCR" in desc["search_documents"])
@@ -78,6 +78,22 @@ async def main():
         n_audit = o.execute("SELECT count(*) FROM audit_log WHERE tool='check_citation'").fetchone()[0]
         body = o.execute("SELECT args::text FROM audit_log WHERE tool='check_citation' LIMIT 1").fetchone()[0]
         check("check_citation: 감사 로그에는 건수만 남고 본문 인용은 남지 않음", n_audit >= 3 and "2004다59959" not in body, body)
+
+    # 1-1b) 판례·조문 조회 도구(외부 조회가 꺼진 stdio 환경): 입력 검사와 검색어 거부는 외부와 무관하게 동작한다
+    async with client_for("u_lee") as c:
+        _, sr1 = await call(c, "search_cases", {"query": "소외 여은철 매매계약"})
+        check("search_cases: 사람 이름이 든 검색어는 거부(외부로 나가지 않음)와 재작성 안내", sr1 and sr1.get("rejected") is True and "이름" in sr1["reason"] and "hint" in sr1, sr1)
+        _, sr2 = await call(c, "search_cases", {"query": "2026가단88001 대여금"})
+        check("search_cases: 사건번호가 든 검색어는 거부", sr2 and sr2.get("rejected") is True, sr2)
+        _, sr3 = await call(c, "search_cases", {"query": "소멸시효 채무승인"})
+        check("search_cases: 법률 용어 검색어는 통과(외부 조회 꺼짐이면 안내 오류)", sr3 and ("items" in sr3 or "error" in sr3), sr3)
+        _, gc = await call(c, "get_case", {"case_no": "abc"})
+        check("get_case: 사건번호 형식 검사", gc and "error" in gc and "형식" in gc["error"], gc)
+        _, gs = await call(c, "get_statute", {"law_name": "민법", "article": "168조"})
+        check("get_statute: 조문 표기 검사", gs and "error" in gs, gs)
+        n_sc = o.execute("SELECT count(*) FROM audit_log WHERE tool='search_cases'").fetchone()[0]
+        q_logged = o.execute("SELECT args->>'query' FROM audit_log WHERE tool='search_cases' ORDER BY id LIMIT 1").fetchone()[0]
+        check("search_cases: 거부된 검색어도 감사 로그에 남는다", n_sc >= 3 and q_logged == "소외 여은철 매매계약", q_logged)
 
     # 1-2) 긴 서면(약 20쪽): 기본 응답은 한 부분만, section·part로 나눠 읽기, 마스킹 유지
     sys.path.insert(0, str(ROOT))
