@@ -4,7 +4,8 @@
 #   edge  : 바깥과 연결. 프록시와 '최초 모델 준비'(fetch-models)만 붙는다.
 #   web   : internal. 프록시 ↔ API
 #   data  : internal. API·워커·DB·마이그레이션 — 외부 인터넷으로 나가는 길이 없다.
-#   => 워커(파싱·OCR·임베딩)는 문서 원문을 처리하지만 인터넷에 접근할 수 없다.
+#   lookup: internal. mcp ↔ law-gateway(판례 사건번호 조회 중계). 중계만 edge 로도 나가 법제처에 묻는다.
+#   => 워커(파싱·OCR·임베딩)와 mcp 는 문서 원문을 다루지만 인터넷에 접근할 수 없다.
 #
 # 시작:  docker compose build
 #        docker compose --profile setup run --rm fetch-models     # 최초 1회(인터넷 필요): 모델을 볼륨에 내려받기
@@ -97,6 +98,7 @@ services:
       LAWCA_AUDIT_PASSWORD: ${LAWCA_AUDIT_PASSWORD}
       LAWCA_OFFLINE: "1"
       HF_HUB_OFFLINE: "1"
+      LAWCA_LAW_GATEWAY_URL: http://law-gateway:8002     # 판례 사건번호 조회는 인증값 없이 중계에만 묻는다
     volumes:
       - lawca_models:/home/app/.cache:ro
     tmpfs:
@@ -104,7 +106,7 @@ services:
     depends_on:
       db: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
-    networks: [web, data]              # 인터넷 접근 불가
+    networks: [web, data, lookup]      # 인터넷 접근 불가(lookup 은 중계와만 이어지는 내부 전용 네트워크)
     mem_limit: 4g                       # 질의 임베딩용 모델을 메모리에 올린다
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/healthz', timeout=3).status == 200 else 1)"]
@@ -112,6 +114,24 @@ services:
       timeout: 5s
       retries: 6
       start_period: 20s
+
+  # 판례 사건번호 조회 중계: 인터넷에 나갈 수 있는 유일한 서비스. DB 접근이 없고 법제처 인증값만 가진다.
+  # mcp 와는 내부 전용 네트워크(lookup)로만 연결되고, 받는 것은 형식이 검증된 사건번호 하나뿐이다(server/law_gateway.py).
+  law-gateway:
+    <<: *app
+    command: ["python", "server/law_gateway.py"]
+    environment:
+      LAWCA_LAW_API_OC: ${LAWCA_LAW_API_OC:-}
+    tmpfs:
+      - /tmp:size=16m
+    networks: [lookup, edge]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/healthz', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   worker:
     <<: *app
@@ -169,6 +189,8 @@ networks:
   web:
     internal: true
   data:
+    internal: true
+  lookup:
     internal: true
 
 volumes:

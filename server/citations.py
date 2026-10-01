@@ -12,6 +12,7 @@ import re
 from datetime import date
 
 _MARKS = "재다|재두|재도|재마|재나|다|도|두|므|마|스|모|그|누|나|헌가|헌나|헌마|헌바"
+CASE_NO_OK = re.compile(rf"^(?:19|20)\d{{2}}(?:{_MARKS})\d{{1,7}}$")       # 단독 사건번호 형식(조회 도구 입력 검사용)
 _CASE_RE = re.compile(
     r"(?<![\d가-힣])(?:(?P<court>대법원|헌법재판소|[가-힣]{2,6}(?:고등|지방|가정|행정)법원)\s*)?"
     r"(?:(?P<y>(?:19|20)\d{2})\s*\.\s*(?P<m>\d{1,2})\s*\.\s*(?P<d>\d{1,2})\s*\.?\s*(?:선고|자)?\s*)?"
@@ -122,8 +123,80 @@ def evaluate(cit: dict, registry: dict | None, external: dict | None, external_s
         if registry.get("summary"):
             out["registered_text"] = registry["summary"]
         return out
+    if external and external_state == "ok":
+        if "missing" in external:
+            if external["missing"] == "article_not_found":
+                out.update(status="not_found", ok_to_cite=False, source="external",
+                           reason="법제처에서 이 법령에 그 조문이 없다고 확인됩니다. 조문 번호가 틀렸을 수 있으니 본문에서 빼거나 원문을 확인하세요.")
+            else:
+                out.update(status="unverified", ok_to_cite=False,
+                           reason="법제처에서 이 법령명을 찾지 못했습니다(약칭이거나 표기가 다를 수 있음). 정식 법령명으로 확인하세요.")
+            return out
+        para, paras = cit.get("para"), external.get("paragraphs") or []
+        if para and paras and int(para) not in paras:
+            out.update(status="not_found", ok_to_cite=False, source="external",
+                       reason=f"{external.get('article')}에는 제{para}항이 없습니다(항: {', '.join(str(p) for p in paras)}). 항 번호를 확인하세요.")
+            return out
+        out.update(status="verified_external", ok_to_cite=True, source="external",
+                   reason="법제처의 현행 조문에서 확인됩니다. 항·호의 구체적 내용이 서면의 설명과 맞는지는 조문 본문(official_text)과 대조하세요.",
+                   official_text=external.get("text"))
+        if external.get("effective_date"):
+            out["effective_date"] = external["effective_date"].isoformat()
+        return out
     out.update(status="unverified", ok_to_cite=False, reason="사무소 등록부에 없는 조문입니다. 조문 확인 필요로 표시하세요.")
     return out
+
+
+# ---- 판시 요지 대조(휴리스틱)
+_NOISE = re.compile(r"대법원|고등법원|지방법원|선고|판결|결정|판시|기억|미검증|확인 필요|하였습니다|합니다|입니다")
+
+
+def _bigrams(s: str) -> set[str]:
+    t = re.sub(r"[^가-힣A-Za-z0-9]", "", s)
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def claim_context(text: str, raw: str, max_chars: int = 300) -> str:
+    """서면에서 해당 인용이 나온 문장과 이어지는 한 문장(서면이 그 판례의 요지로 쓴 부분)."""
+    i = text.find(raw)
+    if i < 0:
+        return ""
+    start = max(text.rfind(".", 0, i), text.rfind(chr(10), 0, i)) + 1
+    m = re.search(r"[.\n]", text[i + len(raw):])
+    end = i + len(raw) + (m.end() if m else 0)
+    m2 = re.search(r"[.\n]", text[end:])
+    end = end + (m2.end() if m2 else 0)
+    ctx = (text[start:i] + " " + text[i + len(raw):end]).strip()
+    return _NOISE.sub(" ", re.sub(r"(?:19|20)\d{2}[가-힣]{1,3}\d{1,7}", " ", ctx))[:max_chars].strip()
+
+
+def holding_overlap(claim: str, official: str) -> float | None:
+    """서면의 요지 문장과 법제처 판시사항·판결요지의 겹침(글자 2개 단위). 비교하기엔 문장이 짧으면 None.
+    조사가 붙는 한국어 특성 때문에 단어 대신 2글자 조각을 쓴다. 정확한 판정이 아니라 '의심' 신호이다."""
+    cb = _bigrams(claim)
+    if len(cb) < 12 or not official:
+        return None
+    return len(cb & _bigrams(official)) / len(cb)
+
+
+LOW_OVERLAP = 0.35
+
+
+def enrich_case(result: dict, detail: dict | None, text: str, raw: str) -> dict:
+    """판례 결과에 법제처 판시사항·판결요지(대조용)와 서면 요지와의 겹침 신호를 붙인다."""
+    if not detail:
+        return result
+    official = " ".join(x for x in (detail.get("issue"), detail.get("holding"), (detail.get("body") or "")[:20000]) if x)   # 판시사항·판결요지만으론 짧아 본문도 쓴다
+    result["official"] = {"label": detail.get("label"), "issue": (detail.get("issue") or "")[:400],
+                          "holding": (detail.get("holding") or "")[:600], "ref_statutes": (detail.get("ref_statutes") or "")[:300]}
+    claim = claim_context(text, raw)
+    ov = holding_overlap(claim, official)
+    if ov is not None:
+        result["holding_overlap"] = round(ov, 2)
+        if ov < LOW_OVERLAP:
+            result["holding_warning"] = ("서면이 이 판례의 요지로 쓴 문장이 법제처의 판시사항·판결요지와 거의 겹치지 않습니다. "
+                                         "요지를 잘못 썼을 수 있으니 official의 내용과 직접 대조하세요.")
+    return result
 
 
 def summarize(items: list[dict]) -> dict:
