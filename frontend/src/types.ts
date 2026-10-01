@@ -21,6 +21,7 @@ export interface Matter {
   attorney_name: string | null;
   result: string;
   access_group: string;
+  related_names: string[];
   doc_count: number;
 }
 

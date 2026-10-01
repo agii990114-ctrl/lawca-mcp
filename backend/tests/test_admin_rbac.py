@@ -96,3 +96,14 @@ def test_document_delete_permission_by_role(login, new_matter, owner, uid, can_d
     assert (r.status_code == 200) is can_delete, r.text
     if not can_delete:
         assert r.status_code == 403
+
+
+def test_related_names_can_be_set_and_are_validated(login, new_matter):
+    m = new_matter()
+    a = login("t_lawyer_a")
+    r = a.patch(f"/api/matters/{m['matter_id']}", json={"related_names": ["여은철", " 하태율 ", "여은철"]})
+    assert r.status_code == 200 and r.json()["related_names"] == ["여은철", "하태율"]          # 공백 정리·중복 제거
+    assert a.patch(f"/api/matters/{m['matter_id']}", json={"related_names": ["가"]}).status_code == 400   # 너무 짧은 이름
+    assert a.patch(f"/api/matters/{m['matter_id']}", json={"related_names": []}).json()["related_names"] == []
+    b = login("t_lawyer_b")                                                                        # 접근 권한 없는 사용자는 바꿀 수 없다
+    assert b.patch(f"/api/matters/{m['matter_id']}", json={"related_names": ["침입"]}).status_code == 404

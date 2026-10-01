@@ -126,7 +126,7 @@ def search(conn, *, query=None, limit=5, **filters):
     # ---- 3) 메타데이터 결합
     meta = {r["doc_id"]: r for r in conn.execute(
         "SELECT d.doc_id, d.kind, d.round, d.filed_date, d.author_side, d.version, m.matter_id, m.case_no, m.case_type,"
-        " m.court, m.plaintiff, m.defendant, m.attorney_name, m.our_side, m.result,"
+        " m.court, m.plaintiff, m.defendant, m.attorney_name, m.our_side, m.result, m.related_names,"
         " coalesce((SELECT array_agg(tag ORDER BY tag) FROM doc_issue_tags t WHERE t.doc_id = d.doc_id), ARRAY[]::text[]) AS tags"
         " FROM documents d JOIN matters m USING (matter_id) WHERE d.doc_id = ANY(%s)", (ordered,)).fetchall()}
     results = []
@@ -141,6 +141,7 @@ def search(conn, *, query=None, limit=5, **filters):
             "score": round(scores.get(d, 0.0), 4) if scores else None,
             "matched_signals": ranks.get(d),
             "best_section": sec, "_snippet_raw": txt,
-            "_mask": dict(plaintiff=r["plaintiff"], defendant=r["defendant"], attorney=r["attorney_name"], case_no=r["case_no"]),
+            "_mask": dict(plaintiff=r["plaintiff"], defendant=r["defendant"], attorney=r["attorney_name"], case_no=r["case_no"],
+                          related=r["related_names"]),
         })
     return results, applied, notes

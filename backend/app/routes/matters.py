@@ -12,7 +12,7 @@ CASE_NO_RE = r"^\d{4}(가합|가단|가소|나|다|라|마|머|드단|드합|르
 RESULTS = ("승소", "패소", "일부승소", "진행중")
 
 COLUMNS = ("m.matter_id, m.case_no, m.case_type, m.court, m.plaintiff, m.defendant, m.our_side, m.attorney_name, m.result,"
-           " m.access_group, (SELECT count(*) FROM documents d WHERE d.matter_id = m.matter_id) AS doc_count")
+           " m.access_group, m.related_names, (SELECT count(*) FROM documents d WHERE d.matter_id = m.matter_id) AS doc_count")
 
 
 class MatterCreate(BaseModel):
@@ -31,6 +31,7 @@ class MatterPatch(BaseModel):
     court: str | None = Field(None, max_length=100)
     attorney_name: str | None = Field(None, max_length=50)
     result: str | None = None
+    related_names: list[str] | None = Field(None, max_length=50)    # 마스킹할 제3자 이름(증인·대표이사·상대방 직원 등)
 
 
 def _norm_case_no(s: str) -> str:
@@ -94,6 +95,11 @@ def create_matter(body: MatterCreate, user: dict = Depends(require("matters.crea
 def patch_matter(matter_id: str, body: MatterPatch, user: dict = Depends(require("matters.create"))):
     if body.result is not None and body.result not in RESULTS:
         raise HTTPException(400, f"result는 {', '.join(RESULTS)} 중 하나여야 합니다.")
+    if body.related_names is not None:
+        names = [re.sub(r"\s+", " ", n).strip() for n in body.related_names]
+        if any(len(n) < 2 or len(n) > 30 for n in names):
+            raise HTTPException(400, "관련자 이름은 2~30자여야 합니다.")
+        body.related_names = sorted(set(names))
     sets, params = [], []
     for k, v in body.model_dump(exclude_none=True).items():
         sets.append(f"{k} = %s"); params.append(v)
