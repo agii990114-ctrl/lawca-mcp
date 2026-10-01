@@ -47,7 +47,7 @@ export default function AiAccess() {
     <div className="page">
       <h1>AI 연결</h1>
       <p className="muted">
-        Claude 같은 AI가 <strong>내 권한으로</strong> 사내 서면을 검색·조회해 준비서면 초안 작성을 돕게 하려면 여기서 개인 토큰을 발급해 AI 프로그램에 등록합니다.
+        Claude·Cursor·Gemini CLI·Codex 같은 AI 프로그램이 <strong>내 권한으로</strong> 사내 서면을 검색·조회해 준비서면 초안 작성을 돕게 하려면 여기서 개인 토큰을 발급해 AI 프로그램에 등록합니다.
         AI는 내가 볼 수 있는 접근 그룹의 문서만 다루고, 참고 서면의 당사자·금액·사건번호는 가려진 상태로 전달됩니다. 모든 조회는 감사 로그에 남습니다.
       </p>
       <div className="alert alert-warn">
@@ -117,18 +117,64 @@ function CopyBox({ label, text }: { label: string; text: string }) {
   );
 }
 
+type Client = "claude" | "cursor" | "gemini" | "codex" | "web";
+const CLIENTS: { id: Client; label: string }[] = [
+  { id: "claude", label: "Claude Code" },
+  { id: "cursor", label: "Cursor" },
+  { id: "gemini", label: "Gemini CLI" },
+  { id: "codex", label: "Codex(OpenAI)" },
+  { id: "web", label: "ChatGPT·웹 앱" },
+];
+
 function CreatedModal({ t, url, onClose }: { t: Created; url: string; onClose: () => void }) {
-  const cli = `claude mcp add --transport http lawca ${url} --header "Authorization: Bearer ${t.token}"`;
-  const json = JSON.stringify({ mcpServers: { lawca: { type: "http", url, headers: { Authorization: `Bearer ${t.token}` } } } }, null, 2);
+  const [client, setClient] = useState<Client>("claude");
+  const auth = `Bearer ${t.token}`;
+  const cli = `claude mcp add --transport http lawca ${url} --header "Authorization: ${auth}"`;
+  const claudeJson = JSON.stringify({ mcpServers: { lawca: { type: "http", url, headers: { Authorization: auth } } } }, null, 2);
+  const cursorJson = JSON.stringify({ mcpServers: { lawca: { url, headers: { Authorization: auth } } } }, null, 2);
+  const geminiJson = JSON.stringify({ mcpServers: { lawca: { httpUrl: url, headers: { Authorization: auth } } } }, null, 2);
+  const codexToml = `[mcp_servers.lawca]
+url = "${url}"
+bearer_token_env_var = "LAWCA_MCP_TOKEN"`;
+  const codexEnvWin = `setx LAWCA_MCP_TOKEN "${t.token}"`;
+  const codexEnvNix = `export LAWCA_MCP_TOKEN="${t.token}"`;
   return (
     <Modal title="토큰이 발급되었습니다" onClose={onClose} wide footer={<button className="btn btn-primary" onClick={onClose}>안전한 곳에 저장했습니다</button>}>
       <div className="alert alert-warn"><strong>이 창을 닫으면 토큰을 다시 볼 수 없습니다.</strong> 잃어버리면 새로 발급받으세요.</div>
       <CopyBox label="토큰" text={t.token} />
-      <h3>Claude Code에 등록</h3>
-      <CopyBox label="터미널에서 실행" text={cli} />
-      <h3>설정 파일(.mcp.json)로 등록</h3>
-      <pre className="preview" tabIndex={0} aria-label=".mcp.json 예시">{json}</pre>
-      <p className="hint">연결되면 AI에게 “내 사건 목록을 보여줘”, “대여금 소멸시효 항변에 대응한 준비서면을 찾아줘”처럼 요청할 수 있습니다. AI가 쓴 글은 항상 변호사가 검토해야 하는 초안입니다.</p>
+      <div className="tabs" role="tablist" aria-label="AI 프로그램 선택">
+        {CLIENTS.map((c) => (
+          <button key={c.id} type="button" role="tab" aria-selected={client === c.id} className={client === c.id ? "tab-on" : ""} onClick={() => setClient(c.id)}>{c.label}</button>
+        ))}
+      </div>
+      {client === "claude" && (<>
+        <CopyBox label="터미널에서 실행" text={cli} />
+        <h3>또는 설정 파일(.mcp.json)</h3>
+        <pre className="preview" tabIndex={0} aria-label="Claude Code 설정 예시">{claudeJson}</pre>
+      </>)}
+      {client === "cursor" && (<>
+        <p className="hint">Cursor 설정의 MCP 화면에서 서버를 추가하거나, 아래 내용을 <code>~/.cursor/mcp.json</code>(모든 프로젝트) 또는 프로젝트의 <code>.cursor/mcp.json</code>에 넣습니다. 프로젝트 파일에 넣을 때는 저장소에 올라가지 않게 주의하세요.</p>
+        <pre className="preview" tabIndex={0} aria-label="Cursor 설정 예시">{cursorJson}</pre>
+      </>)}
+      {client === "gemini" && (<>
+        <p className="hint"><code>~/.gemini/settings.json</code>(또는 프로젝트의 <code>.gemini/settings.json</code>)의 <code>mcpServers</code>에 넣습니다. 서버 주소 항목 이름이 <code>httpUrl</code>인 점에 주의하세요.</p>
+        <pre className="preview" tabIndex={0} aria-label="Gemini CLI 설정 예시">{geminiJson}</pre>
+      </>)}
+      {client === "codex" && (<>
+        <p className="hint">Codex는 토큰을 파일에 적지 않고 환경변수로 읽습니다. 먼저 환경변수를 지정하고(Windows는 새 터미널을 열어야 적용됩니다), <code>~/.codex/config.toml</code>에 아래 설정을 추가합니다.</p>
+        <CopyBox label="환경변수 지정 (Windows)" text={codexEnvWin} />
+        <CopyBox label="환경변수 지정 (macOS·Linux)" text={codexEnvNix} />
+        <pre className="preview" tabIndex={0} aria-label="Codex 설정 예시">{codexToml}</pre>
+      </>)}
+      {client === "web" && (
+        <div className="alert alert-warn">
+          ChatGPT 웹·데스크톱, claude.ai 같은 <strong>웹 앱의 커넥터</strong>는 아직 지원하지 않습니다. 이런 앱은 사용자의 PC가 아니라 회사(OpenAI·Anthropic) 서버에서 이 서버로 접속하기 때문에,
+          이 서버를 인터넷에 공개하고 별도의 로그인(OAuth) 방식을 갖춰야 합니다. 사무소 정책 결정이 필요한 사항이라 관리자에게 문의하세요.
+          위의 프로그램(Claude Code, Cursor, Gemini CLI, Codex)은 사용자의 PC에서 접속하므로 사내 주소로 연결할 수 있습니다.
+        </div>
+      )}
+      <p className="hint">연결되면 AI에게 “내 사건 목록을 보여줘”, “대여금 소멸시효 항변에 대응한 준비서면을 찾아줘”처럼 요청할 수 있습니다. AI가 쓴 글은 항상 변호사가 검토해야 하는 초안입니다.
+        어떤 AI 프로그램이든 <strong>사무소가 허용한 것만</strong> 사용하세요. 프로그램마다 대화 내용이 전송되는 회사와 보관 정책이 다릅니다.</p>
     </Modal>
   );
 }
