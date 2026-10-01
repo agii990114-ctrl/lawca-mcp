@@ -1,6 +1,6 @@
 # lawca MCP 서버
 
-가상의 더미 사건·서면 데이터를 PostgreSQL(+pgvector)에서 조회하는 MCP 서버. 도구 4개: `list_matters`, `search_documents`, `get_document`(긴 서면은 `section`·`part`로 나누어 읽기), `check_citation`.
+가상의 더미 사건·서면 데이터를 PostgreSQL(+pgvector)에서 조회하는 MCP 서버. 도구 7개: `list_matters`, `search_documents`, `get_document`(긴 서면은 `section`·`part`로 나누어 읽기), `check_citation`, 공개 판례·조문 조회 `get_case`·`get_statute`·`search_cases`.
 
 ## 접속 방식
 
@@ -52,5 +52,6 @@ stdio 모드는 클라이언트 설정에서 `LAWCA_USER_ID` 환경변수로 사
 - **마스킹**: 참고 서면 본문은 기본 마스킹한다. 정규식(번호·금액·주소·상호) + 사건 DB의 당사자·담당 변호사·등록 관련자(`related_names`, 웹 사건 화면에서 등록) 이름 + 역할어·호칭이 붙은 제3자 인명(`소외 ○○○`, `○○○ 씨`). 역할어 없는 제3자 인명·건물명만 있는 주소는 탐지하지 못한다(`residual_risk` 참고).
 - **프롬프트 인젝션 대응**: 본문은 데이터일 뿐이라는 안내를 서버 지침과 반환값에 포함(모델이 따르는지는 별도 검증 필요).
 - **HTTP 모드의 방어**: 토큰은 DB에 해시로만 저장되고 MCP 서버(읽기 전용 계정)는 검증 함수만 호출할 수 있다. 신원 위조 헤더는 무시하고, 환경변수 신원은 쓰지 않으며, 사용자당 분당 120회로 호출 속도를 제한한다(서버 프로세스별 메모리 기준). 감사 로그에 어떤 토큰으로 호출했는지 남는다.
-- **인용 확인(`check_citation`)**: 초안 속 판례 사건번호·조문을 뽑아 (1) 사무소 등록부 `verified_citations`(변호사가 원문 확인 후 등록) → (2) 법제처 공개 API(`LAWCA_LAW_API_OC` 설정 시에만, 사건번호만 전송) 순서로 대조한다. 확인되면 `ok_to_cite`, 아니면 `unverified`/`not_found`/`date_mismatch`/`inconsistent`로 돌려 에이전트가 본문에서 빼게 한다. **확인 범위는 존재와 번호·선고일 일치까지**이며 판시 요지와 조문 현행 여부는 사람이 원문으로 대조해야 한다(`holding_checked=false`). 등록: `python db/seed_citations.py --file 항목.json`. 외부 조회는 컨테이너의 인터넷 차단 때문에 운영에서는 허용 목록 경로를 따로 열어야 하고, 실제 법제처 서비스에는 아직 시험하지 못했다(모의 응답만).
+- **공개 판례·조문 조회**(법제처 Open API): `get_case`(사건번호 → 판시사항·판결요지·참조조문·본문, 긴 본문은 `part`), `get_statute`(법령명+조문번호 → 현행 조문·시행일), `search_cases`(법률 용어 검색어 → 판례 목록). 서버가 법제처를 직접 부르며(`korean-law-mcp`를 쓰지 않음) 인터넷이 막힌 `mcp` 대신 **`law-gateway` 컨테이너**가 조회한다. 외부로 나가는 값은 검증된 사건번호, 법령명·조문번호, 검색어뿐이다. **검색어는 `query_guard`가 검사한다**: 마스킹 규칙에 걸리는 값(번호·금액·주소·상호·역할어가 붙은 이름·호칭)·50자 초과·줄바꿈이면 거부하고 사유와 재작성 안내를 돌려주며(AI가 고쳐 다시 요청), mcp와 중계 양쪽에서 검사한다. 검색어는 감사 로그에 그대로 남는다. 한계: 이름만 있는 검색어나 법률 용어로 풀어 쓴 사건 특징은 규칙으로 못 잡고, 그 부분은 도구 설명이 막는다.
+- **인용 확인(`check_citation`)**: 초안 속 판례 사건번호·조문을 뽑아 (1) 사무소 등록부 `verified_citations` → (2) 법제처 조회 순서로 대조한다. 판례는 존재와 선고일 일치(하급심 표기 `서울고등법원-2023-누-36796`도 정규화해 비교), 조문은 그 법령에 그 조문·항이 있는지와 시행일을 확인한다. 판례는 법제처의 판시사항·판결요지(`official`)를 함께 돌려주고, 서면이 그 판례의 요지로 쓴 문장이 판례 내용과 거의 겹치지 않으면 `holding_warning`을 붙인다(글자 2개 단위 겹침 휴리스틱: 전혀 다른 쟁점은 잡지만 같은 분야의 조금 다른 요지는 못 잡는다). 확인되면 `ok_to_cite`, 아니면 `unverified`/`not_found`/`date_mismatch`/`inconsistent`로 돌려 에이전트가 본문에서 빼게 한다. 요지의 정확성과 개정 이력은 변호사가 원문으로 대조해야 한다. `law-gateway`는 DB 접근이 없고, 사건번호·법령명·조문·검사를 통과한 검색어만 받으며 법제처 한 곳에만 질의한다(응답은 필요한 필드만 반환, 24시간 캐시, 분당 60회 제한). 인증값은 `.env`의 `LAWCA_LAW_API_OC`이며 중계에만 전달된다. 법제처 DB에 없다고 해서 존재하지 않는다는 뜻은 아니다. 등록부 관리 화면은 아직 없다(`python db/seed_citations.py --file 항목.json`).
 - 테스트: `server/tests/e2e.py`(stdio, 39개), `server/tests/test_citations.py`(인용 추출·판정 단위 시험), `server/tests/http_e2e.py`(컨테이너 스택·토큰 인증, 24개). 실제 Claude 연결 확인은 `eval/claude_http_check.py`. 서면 초안 반복 시험(요청 3종 × N회, 자동 채점)은 `python eval/brief_eval.py --runs 6 --scenario with04|without04`(모델 사용량이 든다).
