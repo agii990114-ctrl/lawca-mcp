@@ -175,3 +175,36 @@ def test_two_workers_never_process_the_same_job(login, owner):
         for j in (j1, j2):     # 정리: 실패 처리
             with c1.transaction():
                 pipeline._finish(c1, j["job_id"], "failed", "테스트 정리")
+
+
+def _scan_pages():
+    body = ["피고는 소멸시효 완성을 원용하고 원고 주장의 대여 사실은 증거가 없다고 다툽니다." for _ in range(16)]
+    return [["준 비 서 면"] + body, ["2. 인정 및 부인"] + body, ["3. 쟁점별 반박"] + body, ["4. 입증방법"] + body]
+
+
+@pytest.mark.skipif(scan_pdf(["x"]) is None, reason="한글 폰트가 없어 스캔 PDF를 만들 수 없음")
+def test_scan_with_an_unreadable_page_is_sent_to_review_not_silently_indexed(login, new_matter):
+    """문서 전체 글자 수는 충분해도 한 쪽이 통째로 읽히지 않으면 조용히 색인하지 않고 확인 대기로 보낸다(트러블슈팅 23번)."""
+    from backend.tests.helpers import scan_pdf_pages
+    m = new_matter()
+    a = login("t_lawyer_a")
+    r = up(a, [("누락쪽.pdf", scan_pdf_pages(_scan_pages(), faint_pages=(3,)))], matter_id=m["matter_id"])
+    job_id = r.json()["jobs"][0]["job_id"]
+    run_worker()
+    job = a.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "needs_review", job
+    assert "3쪽" in job["reason"] and "OCR" in job["reason"], job["reason"]
+    assert job["parse_meta"]["suspect_pages"] == [3] and job["parse_meta"]["pages"] == 4
+
+
+@pytest.mark.skipif(scan_pdf(["x"]) is None, reason="한글 폰트가 없어 스캔 PDF를 만들 수 없음")
+def test_multi_page_scan_with_all_pages_readable_is_indexed(login, new_matter):
+    from backend.tests.helpers import scan_pdf_pages
+    m = new_matter()
+    a = login("t_lawyer_a")
+    r = up(a, [("정상쪽.pdf", scan_pdf_pages(_scan_pages()))], matter_id=m["matter_id"])
+    job_id = r.json()["jobs"][0]["job_id"]
+    run_worker()
+    job = a.get(f"/api/jobs/{job_id}").json()
+    assert job["status"] == "done", job
+    assert job["parse_meta"]["suspect_pages"] == []

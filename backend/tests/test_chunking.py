@@ -88,3 +88,59 @@ def test_doc_kind_comes_from_the_title_line_only():
     assert metadata.detect("계 약 서\n제1조 (목적)")["doc_kind"] == "계약서"
     assert metadata.detect("\n\n  준 비 서 면 (제2차)\n사 건 2025가합1 대여금")["doc_kind"] == "준 비 서 면"
     assert metadata.detect("준비서면\n의견서를 첨부합니다")["doc_kind"] == "준 비 서 면"      # 본문의 다른 종류 단어에 흔들리지 않는다
+
+
+def test_structured_brief_with_long_paragraphs_stays_within_embedding_limit():
+    """긴 문단이 있는 서면(20쪽 규모)에서도 어떤 청크도 SPLIT_LIMIT을 넘지 않는다.
+    (한도 1,200자일 때 1,197자 청크가 662토큰이 되어 임베딩 입력 한도 512토큰을 넘어 뒤가 잘렸던 문제의 회귀 방지)"""
+    long_para = "원고는 이 사건 대여금에 관하여 시효가 중단되었다고 주장하나 이는 사실과 다릅니다. " * 14   # 약 1,100자, 줄바꿈 없음
+    text = BRIEF.replace("원고 채권은 시효로 소멸하였습니다. 원고 채권은 시효로 소멸하였습니다.", long_para)
+    text = text.replace("문자메시지는 승인에 해당하지 않습니다.", long_para + "\n" + long_para)
+    ch = chunking.chunk_text(text)
+    assert max(len(t) for _, t in ch) <= chunking.SPLIT_LIMIT
+    labels = [l for l, _ in ch]
+    assert any(l.startswith("3.") for l in labels) and any(l.startswith("5.") for l in labels)
+
+
+def test_twenty_page_brief_is_chunked_with_all_standard_sections():
+    body = ("\n".join(f"{'가나다라마바사아자차'[i % 10]}. 쟁점 {i + 1}\n" + ("이 쟁점에 관한 피고의 주장은 다음과 같습니다. " * 30) for i in range(20)))
+    text = BRIEF.split("3. 쟁점별 반박")[0] + "3. 쟁점별 반박\n" + body + "\n\n4. 입증방법\n을 제1호증\n\n5. 결론\n기각되어야 합니다."
+    assert len(text) > 15000
+    ch = chunking.chunk_text(text)
+    labels = {l.split(" > ")[0].split(" (")[0] for l, _ in ch}
+    assert {"1. 상대방 주장의 요지", "2. 인정 및 부인", "3. 쟁점별 반박", "4. 입증방법", "5. 결론"} <= labels
+    assert max(len(t) for _, t in ch) <= chunking.SPLIT_LIMIT
+
+
+# ---- 스캔 문서의 쪽 단위 품질 검사
+
+def test_suspect_pages_flags_thin_ocr_pages_that_the_document_level_gate_misses():
+    pages = [816, 883, 9, 832, 801, 112, 46, 814, 829, 816]            # 20% 가까운 쪽이 거의 비었지만 문서 전체 글자 수는 충분
+    assert metadata.text_quality("가" * sum(pages))[0] is True            # 문서 단위 검사는 통과한다
+    assert metadata.suspect_pages(pages, ocr_pages=list(range(1, 11))) == [3, 6, 7]
+
+
+def test_suspect_pages_ignores_natural_short_last_page_unless_ocr_warned():
+    pages = [820, 840, 810, 830, 120]                                   # 마지막 쪽(결론·서명)은 원래 짧을 수 있다
+    assert metadata.suspect_pages(pages, ocr_pages=[1, 2, 3, 4, 5]) == []
+    assert metadata.suspect_pages(pages, ocr_pages=[1, 2, 3, 4, 5], warned_pages=[5]) == [5]
+
+
+def test_suspect_pages_skips_text_layer_pages_and_tiny_documents():
+    assert metadata.suspect_pages([800, 20, 800, 810], ocr_pages=[1, 3, 4]) == []   # 2쪽은 텍스트층(OCR 미적용)이라 검사 안 함
+    assert metadata.suspect_pages([30, 10, 20], ocr_pages=[1, 2, 3]) == []          # 기준이 너무 작으면 비교하지 않는다
+    assert metadata.suspect_pages([], ocr_pages=[]) == []
+
+
+def test_two_page_scan_with_one_empty_page_is_flagged():
+    assert metadata.suspect_pages([850, 40], ocr_pages=[1, 2], warned_pages=[2]) == [2]
+    assert metadata.suspect_pages([40, 850], ocr_pages=[1, 2]) == [1]
+
+
+def test_page_report_reads_kordoc_json_fields():
+    data = {"pages": [{"markdown": "가" * 600 + "\n![image](image_001.png)"}, {"markdown": "나" * 5}, {"markdown": "다" * 590}, {"markdown": "라" * 610}],
+            "pageQuality": [{"page": i, "ocrApplied": True} for i in (1, 2, 3, 4)],
+            "warnings": [{"page": 2, "code": "OCR_LOW_CONF", "message": "페이지 2: 저신뢰 OCR 라인 7개 폐기 (인식 결손 가능)"}]}
+    rep = metadata.page_report(data)
+    assert rep["pages"] == 4 and rep["page_chars"] == [600, 5, 590, 610]           # 이미지 자리 표시는 글자 수에서 제외
+    assert rep["suspect_pages"] == [2] and rep["ocr_discarded_lines"] == 7

@@ -1,5 +1,6 @@
 """추출된 텍스트에서 문서 메타데이터를 추정한다(규칙 기반). 추정값은 제안일 뿐이며 사람이 검토·수정할 수 있다."""
 import re
+import statistics
 from datetime import date
 
 CASE_NO_RE = re.compile(r"\d{4}(?:가합|가단|가소|나|다|라|마|머|드단|드합|르|카합|카단|카기|고단|고합|고정|구합|구단|누)\d{2,7}")
@@ -65,3 +66,48 @@ def detect(text: str) -> dict:
         except ValueError:
             pass
     return meta
+
+
+# ---- 쪽 단위 품질 검사 (스캔 PDF·이미지)
+THIN_RATIO = 0.3          # 쪽의 글자 수가 기준(다른 쪽의 중앙값)의 30% 미만이면 의심
+MIN_REF_CHARS = 200       # 기준이 너무 작은(거의 글자 없는) 문서는 비교하지 않는다
+_DISCARD_RE = re.compile(r"저신뢰 OCR 라인 (\d+)개 폐기")
+
+
+def suspect_pages(page_chars: list[int], ocr_pages: list[int], warned_pages: list[int] | None = None) -> list[int]:
+    """OCR을 적용한 쪽 중 글자가 유독 적은 쪽(1부터). 문서 전체로는 충분해 보여도 일부 쪽이 통째로 누락된 경우를 잡는다.
+
+    - 기준: 쪽이 3개 이상이면 쪽별 글자 수의 중앙값, 1~2쪽이면 가장 많은 쪽.
+    - 마지막 쪽은 원래 짧은 경우가 많아(결론·서명) OCR 저신뢰 경고가 있을 때만 의심한다.
+    - 텍스트층이 있는 쪽(OCR 미적용)은 검사하지 않는다(빈 쪽이 정상일 수 있다).
+    """
+    n = len(page_chars)
+    if n == 0:
+        return []
+    ref = statistics.median(page_chars) if n >= 3 else max(page_chars)
+    if ref < MIN_REF_CHARS:
+        return []
+    ocr, warned = set(ocr_pages), set(warned_pages or [])
+    out = []
+    for i, c in enumerate(page_chars, 1):
+        if i not in ocr or c >= THIN_RATIO * ref:
+            continue
+        if i == n and i not in warned:
+            continue
+        out.append(i)
+    return out
+
+
+def page_report(data: dict) -> dict:
+    """kordoc JSON 결과에서 쪽별 글자 수·OCR 적용 쪽·경고를 뽑고 의심 쪽을 계산한다."""
+    pages = data.get("pages") or []
+    page_chars = [len(re.sub(r"\s", "", re.sub(r"!\[[^\]]*\]\([^)]*\)", "", p.get("markdown") or ""))) for p in pages]
+    ocr_pages = [q.get("page") for q in (data.get("pageQuality") or []) if q.get("ocrApplied") and q.get("page")]
+    warned, discarded = [], 0
+    for w in data.get("warnings") or []:
+        if w.get("code") == "OCR_LOW_CONF" and w.get("page"):
+            warned.append(w["page"])
+            m = _DISCARD_RE.search(w.get("message") or "")
+            discarded += int(m.group(1)) if m else 0
+    return {"pages": len(pages), "page_chars": page_chars, "ocr_pages": ocr_pages,
+            "ocr_discarded_lines": discarded, "suspect_pages": suspect_pages(page_chars, ocr_pages, warned)}

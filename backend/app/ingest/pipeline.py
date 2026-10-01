@@ -82,6 +82,12 @@ def do_parse(conn, job: dict) -> str:
         with conn.transaction():
             _finish(conn, job["job_id"], "failed", why, parse_meta=meta)
         return "failed"
+    if ok and meta.get("suspect_pages"):
+        # 문서 전체로는 글자가 충분해도 일부 쪽이 통째로 누락됐을 수 있다(스캔 OCR). 조용히 색인하지 않고 사람이 확인하게 한다.
+        sp = meta["suspect_pages"]
+        shown = ", ".join(str(p) for p in sp[:10]) + (" 등" if len(sp) > 10 else "")
+        ok, why = False, (f"스캔 문서의 {shown}쪽에서 글자가 거의 인식되지 않았습니다(OCR 누락 가능). 원본의 해당 쪽을 확인하거나 "
+                          "더 선명하게 스캔해 다시 올려 주세요. 그대로 진행하면 그 쪽의 내용은 검색되지 않습니다.")
     det = metadata.detect(text)
     meta["detected"] = det
     matter_id, auto = job["matter_id"], False
@@ -106,6 +112,8 @@ def do_parse(conn, job: dict) -> str:
                           "(등록되지 않았거나 이 그룹에서 볼 수 없는 사건일 수 있습니다). 사건을 등록하거나 선택해 주세요.")
             elif cands:
                 reason = f"문서에 사건번호가 여러 개 있어 자동으로 지정하지 못했습니다({', '.join(cands)}). 사건을 선택해 주세요."
+            if not ok:                         # 사건 미지정과 품질 문제가 겹치면 둘 다 알린다(사건만 고르고 넘기며 품질 경고를 놓치지 않도록)
+                reason = f"{reason} / {why}"
             _finish(conn, job["job_id"], "needs_review", reason, **upd)
             return "needs_review"
         if not ok:

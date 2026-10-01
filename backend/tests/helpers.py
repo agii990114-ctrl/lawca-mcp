@@ -120,3 +120,26 @@ def scan_pdf(lines: list[str]) -> bytes | None:
     buf = io.BytesIO()
     img.convert("RGB").save(buf, "PDF", resolution=150)
     return buf.getvalue()
+
+
+def scan_pdf_pages(pages: list[list[str]], faint_pages: tuple[int, ...] = ()) -> bytes | None:
+    """여러 쪽짜리 스캔 PDF. faint_pages(1부터)의 글씨는 배경과 거의 같은 밝기로 그려 OCR이 거의 읽지 못하게 한다(쪽 누락 시험)."""
+    font = Path("C:/Windows/Fonts/batang.ttc")
+    if not font.exists():
+        return None
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+    f = ImageFont.truetype(str(font), 30)
+    imgs = []
+    for i, lines in enumerate(pages, 1):
+        img = Image.new("L", (1240, 1000), 255)
+        d = ImageDraw.Draw(img)
+        y = 80
+        for line in lines:
+            d.text((100, y), line, font=f, fill=246 if i in faint_pages else 20)
+            y += 46
+        a = np.array(img).astype(np.float32) + np.random.RandomState(i).normal(0, 8, (1000, 1240))
+        imgs.append(Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)).convert("RGB"))
+    buf = io.BytesIO()
+    imgs[0].save(buf, "PDF", resolution=150, save_all=True, append_images=imgs[1:])
+    return buf.getvalue()

@@ -4,6 +4,7 @@
 - KORDOC_OFFLINE=1 로 실행해 모델 다운로드 등 외부 통신을 막는다(모델은 최초 1회 미리 받아 둔다).
 - 원본 이름으로 파일을 만들지 않는다: 저장소의 해시 경로 파일을 임시 디렉터리에 확장자만 붙여 복사해 넘긴다.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -12,7 +13,10 @@ import uuid
 from pathlib import Path
 
 from .. import config
-from . import storage
+from . import metadata, storage
+
+
+JSON_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 class ParseError(Exception):
@@ -40,8 +44,11 @@ def parse_path(src: Path, ext: str) -> tuple[str, dict]:
     try:
         tmp_in = workdir / f"input{ext}"
         shutil.copyfile(src, tmp_in)
-        out = workdir / "out.md"
+        as_json = ext.lower() in JSON_EXTS          # 스캔 PDF·이미지는 쪽별 정보(글자 수·OCR 경고)를 함께 받는다
+        out = workdir / ("out.json" if as_json else "out.md")
         cmd = ["node", str(config.KORDOC_CLI), str(tmp_in), "--ocr", "--plain", "--no-images", "--silent", "-o", str(out)]
+        if as_json:
+            cmd[3:3] = ["--format", "json"]
         env = dict(os.environ, KORDOC_OFFLINE="1")
         t0 = time.time()
         try:
@@ -53,7 +60,17 @@ def parse_path(src: Path, ext: str) -> tuple[str, dict]:
             raise ParseError("문서 변환 도구(node/kordoc)를 찾을 수 없습니다. 관리자에게 문의하세요.")
         if p.returncode != 0 or not out.exists():
             raise ParseError(_friendly(p.stderr + p.stdout, p.returncode))
-        text = out.read_text(encoding="utf-8", errors="replace")
-        return text, {"parser": "kordoc", "seconds": round(time.time() - t0, 1), "chars": len(text)}
+        meta = {"parser": "kordoc"}
+        if as_json:
+            try:
+                data = json.loads(out.read_text(encoding="utf-8", errors="replace"))
+                text = data.get("markdown") or ""
+            except ValueError:
+                raise ParseError(_friendly(p.stderr + p.stdout, p.returncode))
+            meta.update(metadata.page_report(data))
+        else:
+            text = out.read_text(encoding="utf-8", errors="replace")
+        meta.update({"seconds": round(time.time() - t0, 1), "chars": len(text)})
+        return text, meta
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
