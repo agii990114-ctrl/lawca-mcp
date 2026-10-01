@@ -48,10 +48,85 @@ async def main():
     async with client_for("u_admin") as c:
         tools = await c.list_tools()
         names = sorted(t.name for t in tools.tools)
-        check("도구 목록", names == ["get_document", "list_matters", "search_documents"], names)
+        check("도구 목록", names == ["check_citation", "get_document", "list_matters", "search_documents"], names)
         desc = {t.name: t.description for t in tools.tools}
         check("도구 설명에 식별자 전용 인자·OCR 한계 안내 포함",
               "정확 일치" in desc["search_documents"] and "OCR" in desc["search_documents"])
+
+    # 1-1) check_citation: 등록된 조문은 통과, 기억에 의존한 판례·미등록 조문은 인용 불가
+    async with client_for("u_lee") as c:
+        text = ("민법 제168조 제3호에 따라 승인은 시효중단 사유이다. 대법원 2005. 2. 17. 선고 2004다59959 판결. "
+                "민법 제174조도 본다. 대법원 2099. 1. 1. 선고 2001다3672 판결.")
+        _, p = await call(c, "check_citation", {"text": text})
+        byk = {r["citation"]: r for r in (p or {}).get("results", [])}
+        check("check_citation: 등록 조문(민법 제168조)은 ok_to_cite", byk.get("민법 제168조", {}).get("ok_to_cite") is True, byk.get("민법 제168조"))
+        check("check_citation: 미등록 조문(제174조)은 인용 불가", byk.get("제174조", {}).get("ok_to_cite") is False or byk.get("민법 제174조", {}).get("ok_to_cite") is False)
+        check("check_citation: 등록·외부 확인 없는 판례는 인용 불가(unverified)",
+              byk.get("2004다59959", {}).get("status") == "unverified" and byk["2004다59959"]["ok_to_cite"] is False, byk.get("2004다59959"))
+        check("check_citation: 미래 선고일은 inconsistent", byk.get("2001다3672", {}).get("status") == "inconsistent", byk.get("2001다3672"))
+        check("check_citation: 판례는 요지 미확인을 명시", byk.get("2004다59959", {}).get("holding_checked") is False)
+        check("check_citation: 인용 불가 항목에 대한 조치 안내", "action" in (p or {}))
+        o.execute("INSERT INTO verified_citations (kind,key,label,summary,decision_date,source,verified_by)"
+                  " VALUES ('case','2004다59959','물품대금','채무승인의 방식','2005-02-17','e2e 시험','e2e')"
+                  " ON CONFLICT DO NOTHING")
+        _, p2 = await call(c, "check_citation", {"text": "대법원 2005. 2. 17. 선고 2004다59959 판결"})
+        r0 = (p2 or {}).get("results", [{}])[0]
+        check("check_citation: 등록부에 넣으면 verified_registry", r0.get("status") == "verified_registry" and r0.get("ok_to_cite") is True, r0)
+        _, p3 = await call(c, "check_citation", {"text": "대법원 2005. 2. 18. 선고 2004다59959 판결"})
+        check("check_citation: 선고일이 다르면 date_mismatch", (p3 or {}).get("results", [{}])[0].get("status") == "date_mismatch")
+        o.execute("DELETE FROM verified_citations WHERE key = '2004다59959' AND verified_by = 'e2e'")
+        n_audit = o.execute("SELECT count(*) FROM audit_log WHERE tool='check_citation'").fetchone()[0]
+        body = o.execute("SELECT args::text FROM audit_log WHERE tool='check_citation' LIMIT 1").fetchone()[0]
+        check("check_citation: 감사 로그에는 건수만 남고 본문 인용은 남지 않음", n_audit >= 3 and "2004다59959" not in body, body)
+
+    # 1-2) 긴 서면(약 20쪽): 기본 응답은 한 부분만, section·part로 나눠 읽기, 마스킹 유지
+    sys.path.insert(0, str(ROOT))
+    from backend.app.ingest import chunking
+    a_matter = next(m for m, g in grp_of_matter.items() if g == "G-A")
+    base = [r[0] for r in o.execute("SELECT full_text FROM documents WHERE kind LIKE '준%' ORDER BY doc_id LIMIT 30")]
+    body = "\n\n".join(f"{'가나다라마바사아자차카타파하'[i % 14]}. 쟁점 {i + 1}\n" + " ".join(t.split()) for i, t in enumerate(base * 2))
+    long_text = ("준 비 서 면\n\n1. 상대방 주장의 요지\n원고는 연락처 010-1234-5678 로 문의하였다고 주장합니다. "
+                 "목격자 박다람이 이를 보았다고 하며 서울 마포구 성산로 45, 302호에서 만났다고 합니다.\n\n"
+                 "2. 인정 및 부인\n가. 대여 사실은 인정합니다.\n\n3. 쟁점별 반박\n" + body +
+                 "\n\n4. 입증방법\n을 제1호증 문자메시지\n\n5. 결론\n원고의 청구는 기각되어야 합니다.")
+    LONG_ID = "zz_long_e2e"
+    o.execute("DELETE FROM documents WHERE doc_id = %s", (LONG_ID,))
+    o.execute("INSERT INTO documents (doc_id, matter_id, kind, round, author_side, version, full_text, text_norm, access_group)"
+              " VALUES (%s,%s,'준 비 서 면',1,'피고','최종본',%s,%s,'G-A')", (LONG_ID, a_matter, long_text, long_text.replace(" ", "")))
+    for i, (sec, txt) in enumerate(chunking.chunk_text(long_text)):
+        o.execute("INSERT INTO doc_chunks (doc_id, seq, section, text, text_norm, access_group) VALUES (%s,%s,%s,%s,%s,'G-A')",
+                  (LONG_ID, i, sec, txt, txt.replace(" ", "")))
+    try:
+        async with client_for("u_lee") as c:
+            _, d1 = await call(c, "get_document", {"doc_id": LONG_ID})
+            check(f"긴 서면({len(long_text):,}자): 기본 응답은 한 부분(8,000자 이내)만",
+                  d1 and d1["total_parts"] > 1 and len(d1["text"]) <= 8000 and d1["part"] == 1 and "next_part_hint" in d1,
+                  (d1 or {}).get("total_parts"))
+            check("긴 서면: 전체 글자 수와 섹션 목록을 알려 준다", d1["total_chars"] > 8000 and len(d1["sections"]) >= 5)
+            _, d2 = await call(c, "get_document", {"doc_id": LONG_ID, "part": 2})
+            check("긴 서면: part=2 는 다음 부분", d2["part"] == 2 and d2["text"] != d1["text"])
+            _, dl = await call(c, "get_document", {"doc_id": LONG_ID, "part": d1["total_parts"]})
+            check("긴 서면: 마지막 부분까지 읽을 수 있다", dl["part"] == d1["total_parts"] and "기각" in dl["text"])
+            _, d3 = await call(c, "get_document", {"doc_id": LONG_ID, "part": 99})
+            check("긴 서면: 범위 밖 part 는 오류", d3 and "error" in d3)
+            _, ds = await call(c, "get_document", {"doc_id": LONG_ID, "section": "입증방법"})
+            check("section='입증방법': 그 섹션만 반환", ds["total_parts"] == 1 and "을 제1호증" in ds["text"] and "쟁점 1" not in ds["text"], ds["text"][:60])
+            _, ds2 = await call(c, "get_document", {"doc_id": LONG_ID, "section": "쟁점별 반박 > 나"})
+            check("section='쟁점별 반박 > 나': 해당 소절만", ds2 and "error" not in ds2 and ds2["total_chars"] < d1["total_chars"] / 2, (ds2 or {}).get("total_chars"))
+            _, dn = await call(c, "get_document", {"doc_id": LONG_ID, "section": "없는섹션"})
+            check("없는 section: 사용 가능한 목록을 돌려준다", dn and "error" in dn and len(dn.get("sections", [])) >= 5)
+            _, dm = await call(c, "get_document", {"doc_id": LONG_ID, "section": "상대방 주장"})
+            check("분할·섹션 조회에도 마스킹 유지(전화번호)", "010-1234-5678" not in dm["text"] and "[전화번호]" in dm["text"], dm["text"][:80])
+            check("주소가 마스킹된다", "성산로" not in dm["text"] and "[주소]" in dm["text"], dm["text"][:160])
+            check("등록 전에는 이름만 있는 제3자(박다람)가 남는다(규칙은 역할어·호칭이 있을 때만 작동)", "박다람" in dm["text"])
+            o.execute("UPDATE matters SET related_names = ARRAY['박다람'] WHERE matter_id = %s", (a_matter,))
+            _, dm2 = await call(c, "get_document", {"doc_id": LONG_ID, "section": "상대방 주장"})
+            check("사건에 관련자로 등록하면 그 이름이 마스킹된다", "박다람" not in dm2["text"] and "[관련자]" in dm2["text"], dm2["text"][:160])
+            _, dsh = await call(c, "get_document", {"doc_id": "d6101b"})
+            check("짧은 서면은 종전과 같이 한 번에 전체 반환", dsh["total_parts"] == 1 and "next_part_hint" not in dsh and dsh["part"] == 1)
+    finally:
+        o.execute("UPDATE matters SET related_names = '{}' WHERE matter_id = %s", (a_matter,))
+        o.execute("DELETE FROM documents WHERE doc_id = %s", (LONG_ID,))
 
     # 2) 사용자별 list_matters
     for uid, groups in {"u_park": {"G-C"}, "u_lee": {"G-A"}, "u_kim": {"G-A", "G-B"},

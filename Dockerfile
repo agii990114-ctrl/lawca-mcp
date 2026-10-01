@@ -32,7 +32,7 @@ COPY backend/__init__.py backend/__init__.py
 COPY backend/app backend/app
 COPY backend/tools/package.json backend/tools/package.json
 COPY --from=tools /tools/node_modules backend/tools/node_modules
-COPY server/db.py server/http_auth.py server/lawca_server.py server/masking.py server/search.py server/
+COPY server/*.py server/
 COPY db/migrate.py db/migrate.py
 COPY db/migrations db/migrations
 COPY --from=web /web/dist frontend/dist

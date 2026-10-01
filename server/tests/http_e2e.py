@@ -83,7 +83,7 @@ async def main():
     # --- u_kim 토큰으로 실제 MCP 사용
     async with mcp_client(kim["token"]) as c:
         tools = sorted(t.name for t in (await c.list_tools()).tools)
-        check("도구 목록", tools == ["get_document", "list_matters", "search_documents"], tools)
+        check("도구 목록", tools == ["check_citation", "get_document", "list_matters", "search_documents"], tools)
         lm = await call(c, "list_matters", {"limit": 100})
         check("list_matters: u_kim 접근 범위(G-A·G-B) 사건", lm["count"] >= 24, lm["count"])
         check("사건번호·당사자는 기본으로 가려진다", all(m["case_no"] == "[사건번호]" and m["plaintiff"] == "[원고]" for m in lm["matters"]))
